@@ -23,7 +23,7 @@ app.get('/sedes', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener las sedes' });
   }
 });
-app.delete('/api/sedes/:id', async (req, res) => {
+app.delete('/sedes/:id', async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query('DELETE FROM sedes WHERE id = $1', [id]);

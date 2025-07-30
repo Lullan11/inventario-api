@@ -23,6 +23,17 @@ app.get('/sedes', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener las sedes' });
   }
 });
+app.delete('/api/sedes/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM sedes WHERE id = $1', [id]);
+    res.json({ mensaje: 'Sede eliminada correctamente' });
+  } catch (error) {
+    console.error('Error al eliminar la sede:', error);
+    res.status(500).json({ error: 'Error al eliminar la sede' });
+  }
+});
+
 
 // Iniciar servidor
 app.listen(port, () => {

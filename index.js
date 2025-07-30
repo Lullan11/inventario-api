@@ -33,6 +33,20 @@ app.delete('/sedes/:id', async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar la sede' });
   }
 });
+app.post('/sedes', async (req, res) => {
+  const { codigo, nombre, direccion } = req.body;
+  try {
+    await pool.query(
+      'INSERT INTO sedes (codigo, nombre, direccion) VALUES ($1, $2, $3)',
+      [codigo, nombre, direccion]
+    );
+    res.status(201).json({ mensaje: 'Sede creada correctamente' });
+  } catch (error) {
+    console.error('Error al crear sede:', error);
+    res.status(500).json({ error: 'Error al crear sede' });
+  }
+});
+
 
 
 // Iniciar servidor

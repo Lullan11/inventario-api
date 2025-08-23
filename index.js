@@ -105,11 +105,11 @@ app.put('/sedes/:id', async (req, res) => {
 app.get('/areas', async (req, res) => {
   try {
     const result = await pool.query(`
-    SELECT a.id, a.codigo, a.nombre, s.nombre AS sede_nombre
-    FROM areas a
-    JOIN sedes s ON a.sede_id = s.id
-    ORDER BY a.id
-`);
+      SELECT a.id, a.codigo, a.nombre, s.nombre AS sede_nombre
+      FROM areas a
+      JOIN sedes s ON a.id_sede = s.id
+      ORDER BY a.id
+    `);
     res.json(result.rows);
   } catch (error) {
     console.error('Error al obtener áreas:', error);
@@ -122,9 +122,9 @@ app.get('/areas/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
-      SELECT a.id, a.codigo, a.nombre, s.nombre AS sede
+      SELECT a.id, a.codigo, a.nombre, s.nombre AS sede_nombre
       FROM areas a
-      JOIN sedes s ON a.sede_id = s.id
+      JOIN sedes s ON a.id_sede = s.id
       WHERE a.id = $1
     `, [id]);
 
@@ -140,11 +140,11 @@ app.get('/areas/:id', async (req, res) => {
 
 // Crear un área
 app.post('/areas', async (req, res) => {
-  const { codigo, nombre, sede_id } = req.body;
+  const { codigo, nombre, id_sede } = req.body;
   try {
     await pool.query(
-      'INSERT INTO areas (codigo, nombre, sede_id) VALUES ($1, $2, $3)',
-      [codigo, nombre, sede_id]
+      'INSERT INTO areas (codigo, nombre, id_sede) VALUES ($1, $2, $3)',
+      [codigo, nombre, id_sede]
     );
     res.status(201).json({ message: 'Área creada correctamente' });
   } catch (error) {
@@ -156,15 +156,15 @@ app.post('/areas', async (req, res) => {
 // Actualizar un área
 app.put('/areas/:id', async (req, res) => {
   const { id } = req.params;
-  const { codigo, nombre, sede_id } = req.body;
+  const { codigo, nombre, id_sede } = req.body;
 
   try {
     const result = await pool.query(
       `UPDATE areas
-       SET codigo = $1, nombre = $2, sede_id = $3
+       SET codigo = $1, nombre = $2, id_sede = $3
        WHERE id = $4
        RETURNING *`,
-      [codigo, nombre, sede_id, id]
+      [codigo, nombre, id_sede, id]
     );
 
     if (result.rows.length === 0) {
@@ -187,82 +187,6 @@ app.delete('/areas/:id', async (req, res) => {
   } catch (error) {
     console.error('Error al eliminar área:', error);
     res.status(500).json({ error: 'Error al eliminar el área' });
-  }
-});
-// ✅ Obtener todas las áreas con nombre de la sede
-app.get('/areas', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT a.id, a.codigo, a.nombre, s.nombre AS sede_nombre
-      FROM areas a
-      JOIN sedes s ON a.id_sede = s.id
-      ORDER BY a.id
-    `);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al obtener áreas:', error);
-    res.status(500).json({ error: 'Error al obtener las áreas' });
-  }
-});
-
-// ✅ Obtener un área por id
-app.get('/areas/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query(`
-      SELECT a.id, a.codigo, a.nombre, s.nombre AS sede_nombre
-      FROM areas a
-      JOIN sedes s ON a.id_sede = s.id
-      WHERE a.id = $1
-    `, [id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Área no encontrada' });
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al obtener área:', error);
-    res.status(500).json({ message: 'Error al obtener el área' });
-  }
-});
-
-// ✅ Crear un área
-app.post('/areas', async (req, res) => {
-  const { codigo, nombre, id_sede } = req.body;
-  try {
-    await pool.query(
-      'INSERT INTO areas (codigo, nombre, id_sede) VALUES ($1, $2, $3)',
-      [codigo, nombre, id_sede]
-    );
-    res.status(201).json({ message: 'Área creada correctamente' });
-  } catch (error) {
-    console.error('Error al crear área:', error);
-    res.status(500).json({ error: 'Error al crear el área' });
-  }
-});
-
-// ✅ Actualizar un área
-app.put('/areas/:id', async (req, res) => {
-  const { id } = req.params;
-  const { codigo, nombre, id_sede } = req.body;
-
-  try {
-    const result = await pool.query(
-      `UPDATE areas
-       SET codigo = $1, nombre = $2, id_sede = $3
-       WHERE id = $4
-       RETURNING *`,
-      [codigo, nombre, id_sede, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Área no encontrada' });
-    }
-
-    res.json({ message: 'Área actualizada correctamente', area: result.rows[0] });
-  } catch (error) {
-    console.error('Error al actualizar área:', error);
-    res.status(500).json({ error: 'Error al actualizar el área' });
   }
 });
 

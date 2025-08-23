@@ -33,6 +33,32 @@ app.delete('/sedes/:id', async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar la sede' });
   }
 });
+
+// OBTENER LAS AREAS DE UNA SEDE
+// Áreas de una sede específica
+app.get('/sedes/:id/areas', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT a.id, a.codigo, a.nombre
+       FROM areas a
+       WHERE a.id_sede = $1
+       ORDER BY a.id`,
+      [id]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener áreas de la sede:', error);
+    res.status(500).json({ error: 'Error al obtener áreas de la sede' });
+  }
+});
+
+
+
+
+
+
 app.post('/sedes', async (req, res) => {
   const { codigo, nombre, direccion } = req.body;
   try {

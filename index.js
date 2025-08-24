@@ -148,7 +148,7 @@ app.get('/areas/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
-      SELECT a.id, a.codigo, a.nombre, s.nombre AS sede_nombre
+      SELECT a.id, a.codigo, a.nombre, a.id_sede, s.nombre AS sede_nombre
       FROM areas a
       JOIN sedes s ON a.id_sede = s.id
       WHERE a.id = $1

@@ -164,6 +164,7 @@ app.get('/areas/:id', async (req, res) => {
   }
 });
 
+
 // Crear un área
 app.post('/areas', async (req, res) => {
   const { codigo, nombre, id_sede } = req.body;

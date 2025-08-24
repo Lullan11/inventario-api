@@ -222,6 +222,123 @@ app.delete('/areas/:id', async (req, res) => {
 
 
 
+
+// ========================= PUESTOS DE TRABAJO =========================
+
+// Obtener todos los puestos con área y sede
+app.get('/puestos', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.id, p.codigo, p.responsable_nombre, p.responsable_documento,
+             a.nombre AS area_nombre, s.nombre AS sede_nombre
+      FROM puestos_trabajo p
+      JOIN areas a ON p.id_area = a.id
+      JOIN sedes s ON a.id_sede = s.id
+      ORDER BY p.id
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener puestos:', error);
+    res.status(500).json({ error: 'Error al obtener los puestos' });
+  }
+});
+
+// Obtener un puesto por id
+app.get('/puestos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT p.id, p.codigo, p.responsable_nombre, p.responsable_documento,
+             a.id AS id_area, a.nombre AS area_nombre, s.nombre AS sede_nombre
+      FROM puestos_trabajo p
+      JOIN areas a ON p.id_area = a.id
+      JOIN sedes s ON a.id_sede = s.id
+      WHERE p.id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Puesto no encontrado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener puesto:', error);
+    res.status(500).json({ error: 'Error al obtener el puesto' });
+  }
+});
+
+// Crear un puesto
+app.post('/puestos', async (req, res) => {
+  const { codigo, responsable_nombre, responsable_documento, id_area } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO puestos_trabajo (codigo, responsable_nombre, responsable_documento, id_area)
+       VALUES ($1, $2, $3, $4)`,
+      [codigo, responsable_nombre, responsable_documento, id_area]
+    );
+    res.status(201).json({ message: 'Puesto creado correctamente' });
+  } catch (error) {
+    console.error('Error al crear puesto:', error);
+    res.status(500).json({ error: 'Error al crear el puesto' });
+  }
+});
+
+// Actualizar un puesto
+app.put('/puestos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { codigo, responsable_nombre, responsable_documento, id_area } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE puestos_trabajo
+       SET codigo = $1, responsable_nombre = $2, responsable_documento = $3, id_area = $4
+       WHERE id = $5
+       RETURNING *`,
+      [codigo, responsable_nombre, responsable_documento, id_area, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Puesto no encontrado' });
+    }
+
+    res.json({ message: 'Puesto actualizado correctamente', puesto: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar puesto:', error);
+    res.status(500).json({ error: 'Error al actualizar el puesto' });
+  }
+});
+
+// Eliminar un puesto
+app.delete('/puestos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM puestos_trabajo WHERE id = $1', [id]);
+    res.json({ message: 'Puesto eliminado correctamente' });
+  } catch (error) {
+    console.error('Error al eliminar puesto:', error);
+    res.status(500).json({ error: 'Error al eliminar el puesto' });
+  }
+});
+
+// ✅ Obtener todos los puestos de un área específica
+app.get('/areas/:id/puestos', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT p.id, p.codigo, p.responsable_nombre, p.responsable_documento
+      FROM puestos_trabajo p
+      WHERE p.id_area = $1
+      ORDER BY p.id
+    `, [id]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener puestos de área:', error);
+    res.status(500).json({ error: 'Error al obtener puestos del área' });
+  }
+});
+
+
 // Iniciar servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);

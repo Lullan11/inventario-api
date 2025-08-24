@@ -147,18 +147,19 @@ app.get('/areas', async (req, res) => {
 app.get('/areas/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await pool.query(`
--     SELECT a.id, a.codigo, a.nombre, s.nombre AS sede_nombre
-+     SELECT a.id, a.codigo, a.nombre, a.id_sede, s.nombre AS sede_nombre
-      FROM areas a
-      JOIN sedes s ON a.id_sede = s.id
-      WHERE a.id = $1
-    `, [id]);
+    const result = await pool.query(
+      `SELECT a.id, a.codigo, a.nombre, a.id_sede, s.nombre AS sede_nombre
+       FROM areas a
+       JOIN sedes s ON a.id_sede = s.id
+       WHERE a.id = $1`,
+      [id]
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Área no encontrada' });
     }
-    res.json(result.rows[0]);
+
+    res.json(result.rows[0]); // Devuelve {id, codigo, nombre, id_sede, sede_nombre}
   } catch (error) {
     console.error('Error al obtener área:', error);
     res.status(500).json({ message: 'Error al obtener el área' });

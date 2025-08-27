@@ -339,6 +339,138 @@ app.get('/areas/:id/puestos', async (req, res) => {
 });
 
 
+// ========================= EQUIPOS =========================
+
+// Obtener todos los equipos (general)
+app.get('/equipos', async (req, res) => {
+  const { puesto_id, area_id } = req.query;
+
+  try {
+    let query = `
+      SELECT e.id, e.codigo_interno, e.nombre, e.descripcion, e.estado,
+             e.ubicacion, e.responsable_nombre, e.responsable_documento,
+             a.nombre AS area_nombre, p.codigo AS puesto_codigo
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+    `;
+    const values = [];
+
+    // 🔹 Filtrar por puesto o área si lo envían en la query
+    if (puesto_id) {
+      query += ` WHERE e.id_puesto = $1`;
+      values.push(puesto_id);
+    } else if (area_id) {
+      query += ` WHERE e.id_area = $1`;
+      values.push(area_id);
+    }
+
+    query += ` ORDER BY e.id`;
+
+    const result = await pool.query(query, values);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener equipos:', error);
+    res.status(500).json({ error: 'Error al obtener los equipos' });
+  }
+});
+
+// Obtener un equipo por id
+app.get('/equipos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT e.*, a.nombre AS area_nombre, p.codigo AS puesto_codigo
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      WHERE e.id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Equipo no encontrado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener equipo:', error);
+    res.status(500).json({ error: 'Error al obtener el equipo' });
+  }
+});
+
+// Crear un equipo
+app.post('/equipos', async (req, res) => {
+  const {
+    nombre, descripcion, codigo_interno, estado,
+    motivo_inactivo, ubicacion, id_area, id_puesto,
+    responsable_nombre, responsable_documento, id_tipo_equipo
+  } = req.body;
+
+  try {
+    await pool.query(`
+      INSERT INTO equipos 
+        (nombre, descripcion, codigo_interno, estado, motivo_inactivo, ubicacion,
+         id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `, [
+      nombre, descripcion, codigo_interno, estado, motivo_inactivo, ubicacion,
+      id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo
+    ]);
+
+    res.status(201).json({ message: 'Equipo creado correctamente' });
+  } catch (error) {
+    console.error('Error al crear equipo:', error);
+    res.status(500).json({ error: 'Error al crear el equipo' });
+  }
+});
+
+// Actualizar un equipo
+app.put('/equipos/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    nombre, descripcion, codigo_interno, estado,
+    motivo_inactivo, ubicacion, id_area, id_puesto,
+    responsable_nombre, responsable_documento, id_tipo_equipo
+  } = req.body;
+
+  try {
+    const result = await pool.query(`
+      UPDATE equipos
+      SET nombre=$1, descripcion=$2, codigo_interno=$3, estado=$4, motivo_inactivo=$5,
+          ubicacion=$6, id_area=$7, id_puesto=$8,
+          responsable_nombre=$9, responsable_documento=$10, id_tipo_equipo=$11
+      WHERE id=$12
+      RETURNING *
+    `, [
+      nombre, descripcion, codigo_interno, estado, motivo_inactivo,
+      ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento,
+      id_tipo_equipo, id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Equipo no encontrado' });
+    }
+
+    res.json({ message: 'Equipo actualizado correctamente', equipo: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar equipo:', error);
+    res.status(500).json({ error: 'Error al actualizar el equipo' });
+  }
+});
+
+// Eliminar un equipo
+app.delete('/equipos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM equipos WHERE id = $1', [id]);
+    res.json({ message: 'Equipo eliminado correctamente' });
+  } catch (error) {
+    console.error('Error al eliminar equipo:', error);
+    res.status(500).json({ error: 'Error al eliminar el equipo' });
+  }
+});
+
+
 // Iniciar servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);

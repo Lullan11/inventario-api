@@ -355,7 +355,7 @@ app.get('/equipos', async (req, res) => {
              a.responsable_nombre AS responsable_area,
              p.codigo AS puesto_codigo,
              p.responsable_nombre AS responsable_puesto,
-             p.responsable_documento AS documento_puesto
+             p.responsable_documento AS documento_puestoa
       FROM equipos e
       LEFT JOIN areas a ON e.id_area = a.id
       LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id

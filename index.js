@@ -347,30 +347,22 @@ app.get('/equipos', async (req, res) => {
 
   try {
     let query = `
-SELECT e.id, e.codigo_interno, e.nombre, e.descripcion, e.estado,
-       e.ubicacion,
-       -- Responsable directo del equipo (si lo llenan manualmente)
-       e.responsable_nombre AS responsable_equipo,
-       e.responsable_documento AS documento_equipo,
-
-       -- Datos del área
-       a.nombre AS area_nombre,
-       a.responsable_nombre AS responsable_area,
-
-       -- Datos del puesto
-       p.codigo AS puesto_codigo,
-       p.responsable_nombre AS responsable_puesto,
-       p.responsable_documento AS documento_puesto
-
-FROM equipos e
-LEFT JOIN areas a ON e.id_area = a.id
-LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
-ORDER BY e.id;
-
+      SELECT e.id, e.codigo_interno, e.nombre, e.descripcion, e.estado,
+             e.ubicacion,
+             e.responsable_nombre AS responsable_equipo,
+             e.responsable_documento AS documento_equipo,
+             a.nombre AS area_nombre,
+             a.responsable_nombre AS responsable_area,
+             p.codigo AS puesto_codigo,
+             p.responsable_nombre AS responsable_puesto,
+             p.responsable_documento AS documento_puesto
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
     `;
+    
     const values = [];
-
-    // 🔹 Filtrar por puesto o área si lo envían en la query
+    
     if (puesto_id) {
       query += ` WHERE e.id_puesto = $1`;
       values.push(puesto_id);
@@ -388,6 +380,7 @@ ORDER BY e.id;
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
+
 
 // Obtener un equipo por id
 app.get('/equipos/:id', async (req, res) => {

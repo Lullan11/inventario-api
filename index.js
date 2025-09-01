@@ -355,14 +355,14 @@ app.get('/equipos', async (req, res) => {
              a.responsable_nombre AS responsable_area,
              p.codigo AS puesto_codigo,
              p.responsable_nombre AS responsable_puesto,
-             p.responsable_documento AS documento_puestoa
+             p.responsable_documento AS documento_puesto   -- ✅ corregido
       FROM equipos e
       LEFT JOIN areas a ON e.id_area = a.id
       LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
     `;
-    
+
     const values = [];
-    
+
     if (puesto_id) {
       query += ` WHERE e.id_puesto = $1`;
       values.push(puesto_id);
@@ -376,10 +376,11 @@ app.get('/equipos', async (req, res) => {
     const result = await pool.query(query, values);
     res.json(result.rows);
   } catch (error) {
-    console.error('Error al obtener equipos:', error);
+    console.error('❌ Error al obtener equipos:', error);
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
+
 
 
 // Obtener un equipo por id

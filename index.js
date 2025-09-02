@@ -411,12 +411,14 @@ app.get('/equipos/:id', async (req, res) => {
 });
 
 // crear equipo
+// Crear un equipo
 app.post('/equipos', async (req, res) => {
   const {
     nombre,
     descripcion,
-    ubicacion_tipo, // 'area' o 'puesto'
-    id_ubicacion,   // id del área o puesto
+    codigo_interno,      // ahora se ingresa directamente
+    ubicacion_tipo,      // 'area' o 'puesto'
+    id_ubicacion,        // id del área o puesto
     responsable_nombre,
     responsable_documento,
     id_tipo_equipo,
@@ -424,37 +426,42 @@ app.post('/equipos', async (req, res) => {
   } = req.body;
 
   try {
-    let codigo_interno = '';
     let id_area = null;
     let id_puesto = null;
     let final_responsable_nombre = responsable_nombre;
     let final_responsable_documento = responsable_documento;
 
+    // Obtener IDs de área o puesto según la ubicación
     if (ubicacion_tipo === 'puesto') {
       const puesto = await pool.query(
-        'SELECT codigo, responsable_nombre, responsable_documento, id_area FROM puestos_trabajo WHERE id=$1',
+        'SELECT id_area, responsable_nombre, responsable_documento FROM puestos_trabajo WHERE id=$1',
         [id_ubicacion]
       );
-      if (puesto.rows.length === 0) return res.status(404).json({ msg: 'Puesto no encontrado' });
+      if (puesto.rows.length === 0)
+        return res.status(404).json({ msg: 'Puesto no encontrado' });
 
-      codigo_interno = puesto.rows[0].codigo;
       id_puesto = id_ubicacion;
       id_area = puesto.rows[0].id_area;
-      final_responsable_nombre = puesto.rows[0].responsable_nombre;
-      final_responsable_documento = puesto.rows[0].responsable_documento;
+
+      // Si no se envía responsable, se toma del puesto
+      if (!final_responsable_nombre) final_responsable_nombre = puesto.rows[0].responsable_nombre;
+      if (!final_responsable_documento) final_responsable_documento = puesto.rows[0].responsable_documento;
 
     } else if (ubicacion_tipo === 'area') {
       const area = await pool.query(
-        'SELECT codigo FROM areas WHERE id=$1',
+        'SELECT id FROM areas WHERE id=$1',
         [id_ubicacion]
       );
-      if (area.rows.length === 0) return res.status(404).json({ msg: 'Área no encontrada' });
+      if (area.rows.length === 0)
+        return res.status(404).json({ msg: 'Área no encontrada' });
 
-      codigo_interno = area.rows[0].codigo;
       id_area = id_ubicacion;
+      // responsable se completa manualmente desde el body
+    } else {
+      return res.status(400).json({ msg: 'Tipo de ubicación inválido' });
     }
 
-    // Guardar el equipo
+    // Insertar equipo
     const result = await pool.query(
       `INSERT INTO equipos
        (nombre, descripcion, codigo_interno, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)

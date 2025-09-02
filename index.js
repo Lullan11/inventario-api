@@ -339,62 +339,45 @@ app.get('/areas/:id/puestos', async (req, res) => {
 });
 
 
-// -----------------------------------------
-// EQUIPOS
-// ✅ Obtener todos los equipos (con filtros opcionales)
-app.get("/equipos", async (req, res) => {
-  const { puesto_id, area_id, sede_id } = req.query;
+// ========================= EQUIPOS =========================
 
+// Obtener todos los equipos
+app.get('/equipos', async (req, res) => {
   try {
-    let query = `
-      SELECT e.id, e.codigo_interno, e.nombre, e.descripcion, e.marca, e.serial, e.estado,
-             e.responsable, e.puesto_id, e.area_id, e.sede_id,
-             COALESCE(p.nombre, a.nombre, s.nombre) AS ubicacion
+    const query = `
+      SELECT 
+        e.id,
+        e.codigo_interno,
+        e.nombre AS nombre_equipo,
+        e.descripcion,
+        e.estado,
+        e.marca,
+        e.serial,
+        e.area_id,
+        e.puesto_id,
+        -- 📌 Responsable: si tiene puesto se trae el del puesto, si no el de equipos
+        CASE 
+          WHEN e.puesto_id IS NOT NULL THEN p.responsable
+          ELSE e.responsable
+        END AS responsable,
+        -- 📌 Ubicación: si tiene puesto se trae el nombre del puesto, si no el área
+        CASE 
+          WHEN e.puesto_id IS NOT NULL THEN p.nombre
+          ELSE a.nombre
+        END AS ubicacion
       FROM equipos e
-      LEFT JOIN puestos_trabajo p ON e.puesto_id = p.id
+      LEFT JOIN puestos p ON e.puesto_id = p.id
       LEFT JOIN areas a ON e.area_id = a.id
-      LEFT JOIN sedes s ON e.sede_id = s.id
       WHERE e.estado = 'activo'
+      ORDER BY e.id DESC
     `;
 
-    let params = [];
-
-    if (puesto_id) {
-      query += " AND e.puesto_id = $1";
-      params.push(puesto_id);
-    } else if (area_id) {
-      query += " AND e.area_id = $1";
-      params.push(area_id);
-    } else if (sede_id) {
-      query += " AND e.sede_id = $1";
-      params.push(sede_id);
-    }
-
-    const result = await pool.query(query, params);
+    const result = await pool.query(query);
     res.json(result.rows);
-  } catch (error) {
-    console.error("❌ Error al obtener equipos:", error);
+
+  } catch (err) {
+    console.error("❌ Error al obtener equipos:", err);
     res.status(500).json({ error: "Error al obtener equipos" });
-  }
-});
-
-
-// ✅ Crear un nuevo equipo
-app.post("/equipos", async (req, res) => {
-  const { codigo_interno, nombre, descripcion, marca, serial, responsable, puesto_id, area_id, sede_id } = req.body;
-
-  try {
-    const result = await pool.query(
-      `INSERT INTO equipos (codigo_interno, nombre, descripcion, marca, serial, responsable, puesto_id, area_id, sede_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING *`,
-      [codigo_interno, nombre, descripcion, marca, serial, responsable, puesto_id, area_id, sede_id]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error("❌ Error al crear equipo:", error);
-    res.status(500).json({ error: "Error al crear equipo" });
   }
 });
 

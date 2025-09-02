@@ -410,35 +410,83 @@ app.get('/equipos/:id', async (req, res) => {
   }
 });
 
-// Crear un equipo
+// crear equipo
 app.post('/equipos', async (req, res) => {
   const {
     nombre,
     descripcion,
-    codigo_interno,
-    ubicacion,
-    id_area,
-    id_puesto,
+    ubicacion_tipo, // 'area' o 'puesto'
+    id_ubicacion,   // id del área o puesto
     responsable_nombre,
     responsable_documento,
-    id_tipo_equipo
+    id_tipo_equipo,
+    campos_personalizados // { nombre_campo: valor, ... }
   } = req.body;
 
   try {
+    let codigo_interno = '';
+    let id_area = null;
+    let id_puesto = null;
+    let final_responsable_nombre = responsable_nombre;
+    let final_responsable_documento = responsable_documento;
+
+    if (ubicacion_tipo === 'puesto') {
+      const puesto = await pool.query(
+        'SELECT codigo, responsable_nombre, responsable_documento, id_area FROM puestos_trabajo WHERE id=$1',
+        [id_ubicacion]
+      );
+      if (puesto.rows.length === 0) return res.status(404).json({ msg: 'Puesto no encontrado' });
+
+      codigo_interno = puesto.rows[0].codigo;
+      id_puesto = id_ubicacion;
+      id_area = puesto.rows[0].id_area;
+      final_responsable_nombre = puesto.rows[0].responsable_nombre;
+      final_responsable_documento = puesto.rows[0].responsable_documento;
+
+    } else if (ubicacion_tipo === 'area') {
+      const area = await pool.query(
+        'SELECT codigo FROM areas WHERE id=$1',
+        [id_ubicacion]
+      );
+      if (area.rows.length === 0) return res.status(404).json({ msg: 'Área no encontrada' });
+
+      codigo_interno = area.rows[0].codigo;
+      id_area = id_ubicacion;
+    }
+
+    // Guardar el equipo
     const result = await pool.query(
       `INSERT INTO equipos
-        (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       (nombre, descripcion, codigo_interno, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING *`,
-      [nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo]
+      [nombre, descripcion, codigo_interno, id_area, id_puesto, final_responsable_nombre, final_responsable_documento, id_tipo_equipo]
     );
 
-    res.status(201).json({ message: 'Equipo creado correctamente', equipo: result.rows[0] });
-  } catch (error) {
-    console.error('Error al crear equipo:', error);
-    res.status(500).json({ error: 'Error al crear el equipo' });
+    const id_equipo = result.rows[0].id;
+
+    // Guardar valores personalizados
+    for (const [nombreCampo, valor] of Object.entries(campos_personalizados || {})) {
+      const campoRes = await pool.query(
+        'SELECT id FROM campos_personalizados WHERE nombre_campo=$1 AND id_tipo_equipo=$2',
+        [nombreCampo, id_tipo_equipo]
+      );
+      if (campoRes.rows.length > 0) {
+        await pool.query(
+          'INSERT INTO valores_personalizados (id_equipo, id_campo, valor) VALUES ($1, $2, $3)',
+          [id_equipo, campoRes.rows[0].id, valor]
+        );
+      }
+    }
+
+    res.status(201).json({ msg: 'Equipo creado correctamente', equipo: result.rows[0] });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: 'Error al crear equipo' });
   }
 });
+
 
 // Actualizar un equipo
 app.put('/equipos/:id', async (req, res) => {
@@ -550,6 +598,37 @@ app.get("/tipos-equipo", async (req, res) => {
   }
 });
 
+
+
+
+
+
+// Obtener información de ubicación (puesto o área) para autocompletar responsable y código
+app.get('/ubicacion/:tipo/:id', async (req, res) => {
+  const { tipo, id } = req.params;
+  try {
+    if (tipo === 'puesto') {
+      const result = await pool.query(
+        `SELECT codigo, responsable_nombre FROM puestos_trabajo WHERE id = $1`,
+        [id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ msg: 'Puesto no encontrado' });
+      return res.json(result.rows[0]);
+    } else if (tipo === 'area') {
+      const result = await pool.query(
+        `SELECT codigo, nombre AS responsable_nombre FROM areas WHERE id = $1`,
+        [id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ msg: 'Área no encontrada' });
+      return res.json(result.rows[0]);
+    } else {
+      return res.status(400).json({ msg: 'Tipo de ubicación inválido' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ msg: 'Error al obtener ubicación' });
+  }
+});
 
 
 

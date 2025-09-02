@@ -341,122 +341,145 @@ app.get('/areas/:id/puestos', async (req, res) => {
 
 // ========================= EQUIPOS =========================
 // ========================= EQUIPOS =========================
-// Obtener todos los equipos
+// ========================= EQUIPOS =========================
+
+// Obtener todos los equipos con área, sede y puesto
 app.get('/equipos', async (req, res) => {
   try {
-    const query = `
+    const result = await pool.query(`
       SELECT 
-        e.id,
-        e.codigo_interno,
-        e.nombre,
-        e.descripcion,
-        e.ubicacion,
-        e.area_id,
-        e.id_puesto,
-        -- 📌 Responsable: si tiene puesto se trae el del puesto, si no el de equipos
-        CASE 
-          WHEN e.id_puesto IS NOT NULL THEN p.responsable_nombre
-          ELSE e.responsable_nombre
-        END AS responsable,
-        -- 📌 Ubicación: si tiene puesto se trae el nombre del puesto, si no el área
-        CASE 
-          WHEN e.id_puesto IS NOT NULL THEN p.nombre
-          ELSE a.nombre
-        END AS ubicacion
+        e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
+        e.responsable_nombre, e.responsable_documento,
+        e.id_area, a.nombre AS area_nombre,
+        e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
+        e.id_tipo_equipo,
+        s.id AS id_sede, s.nombre AS sede_nombre
       FROM equipos e
-      LEFT JOIN puestos p ON e.id_puesto = p.id
-      LEFT JOIN areas a ON e.area_id = a.id
-      ORDER BY e.id DESC
-    `;
-
-    const result = await pool.query(query);
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN sedes s ON a.id_sede = s.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      ORDER BY e.id ASC
+    `);
     res.json(result.rows);
-
-  } catch (err) {
-    console.error("❌ Error al obtener equipos:", err);
-    res.status(500).json({ error: "Error al obtener equipos" });
+  } catch (error) {
+    console.error('Error al obtener equipos:', error);
+    res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
 
-
-// ✅ Actualizar un equipo
-app.put("/equipos/:id", async (req, res) => {
+// Obtener un equipo por ID
+app.get('/equipos/:id', async (req, res) => {
   const { id } = req.params;
-  const { nombre, descripcion, marca, serial, responsable } = req.body;
-
   try {
-    const result = await pool.query(
-      `UPDATE equipos
-       SET nombre=$1, descripcion=$2, marca=$3, serial=$4, responsable=$5
-       WHERE id=$6 RETURNING *`,
-      [nombre, descripcion, marca, serial, responsable, id]
-    );
+    const result = await pool.query(`
+      SELECT 
+        e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
+        e.responsable_nombre, e.responsable_documento,
+        e.id_area, a.nombre AS area_nombre,
+        e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
+        e.id_tipo_equipo,
+        s.id AS id_sede, s.nombre AS sede_nombre
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN sedes s ON a.id_sede = s.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      WHERE e.id = $1
+    `, [id]);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Equipo no encontrado" });
+      return res.status(404).json({ message: 'Equipo no encontrado' });
     }
 
     res.json(result.rows[0]);
   } catch (error) {
-    console.error("❌ Error al actualizar equipo:", error);
-    res.status(500).json({ error: "Error al actualizar equipo" });
+    console.error('Error al obtener equipo por id:', error);
+    res.status(500).json({ error: 'Error al obtener el equipo' });
   }
 });
 
-
-// ✅ Eliminar un equipo (requiere formulario de baja)
-app.post("/equipos/:id/baja", async (req, res) => {
-  const { id } = req.params;
-  const { reporte_no, motivo_baja, como_detecto, observaciones } = req.body;
+// Crear un equipo
+app.post('/equipos', async (req, res) => {
+  const {
+    nombre,
+    descripcion,
+    codigo_interno,
+    ubicacion,
+    id_area,
+    id_puesto,
+    responsable_nombre,
+    responsable_documento,
+    id_tipo_equipo
+  } = req.body;
 
   try {
-    // 1. Traer datos del equipo
-    const equipo = await pool.query(
-      `SELECT e.*, COALESCE(p.nombre, a.nombre, s.nombre) AS ubicacion
-       FROM equipos e
-       LEFT JOIN puestos_trabajo p ON e.puesto_id = p.id
-       LEFT JOIN areas a ON e.area_id = a.id
-       LEFT JOIN sedes s ON e.sede_id = s.id
-       WHERE e.id=$1`,
-      [id]
-    );
-
-    if (equipo.rows.length === 0) {
-      return res.status(404).json({ error: "Equipo no encontrado" });
-    }
-
-    const eq = equipo.rows[0];
-
-    // 2. Guardar reporte de baja
-    const reporte = await pool.query(
-      `INSERT INTO reportes_baja
-         (reporte_no, nombre_equipo, codigo_equipo, ubicacion, motivo_baja, como_detecto, responsable, observaciones)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    const result = await pool.query(
+      `INSERT INTO equipos
+        (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
-      [
-        reporte_no,
-        eq.nombre,
-        eq.codigo_interno,
-        eq.ubicacion,
-        motivo_baja,
-        como_detecto,
-        eq.responsable,
-        observaciones,
-      ]
+      [nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo]
     );
 
-    // 3. Eliminar el equipo de la tabla principal
-    await pool.query("DELETE FROM equipos WHERE id=$1", [id]);
-
-    res.json({
-      mensaje: "✅ Equipo dado de baja y eliminado",
-      reporte: reporte.rows[0],
-    });
+    res.status(201).json({ message: 'Equipo creado correctamente', equipo: result.rows[0] });
   } catch (error) {
-    console.error("❌ Error al dar de baja equipo:", error);
-    res.status(500).json({ error: "Error al dar de baja equipo" });
+    console.error('Error al crear equipo:', error);
+    res.status(500).json({ error: 'Error al crear el equipo' });
   }
 });
+
+// Actualizar un equipo
+app.put('/equipos/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    nombre,
+    descripcion,
+    codigo_interno,
+    ubicacion,
+    id_area,
+    id_puesto,
+    responsable_nombre,
+    responsable_documento,
+    id_tipo_equipo
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE equipos
+       SET nombre=$1, descripcion=$2, codigo_interno=$3, ubicacion=$4,
+           id_area=$5, id_puesto=$6, responsable_nombre=$7, responsable_documento=$8, id_tipo_equipo=$9
+       WHERE id=$10
+       RETURNING *`,
+      [nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Equipo no encontrado' });
+    }
+
+    res.json({ message: 'Equipo actualizado correctamente', equipo: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar equipo:', error);
+    res.status(500).json({ error: 'Error al actualizar el equipo' });
+  }
+});
+
+// Eliminar un equipo
+app.delete('/equipos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('DELETE FROM equipos WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Equipo no encontrado' });
+    }
+
+    res.json({ message: 'Equipo eliminado correctamente', equipo: result.rows[0] });
+  } catch (error) {
+    console.error('Error al eliminar equipo:', error);
+    res.status(500).json({ error: 'Error al eliminar el equipo' });
+  }
+});
+
 
 
 // Iniciar servidor

@@ -489,8 +489,8 @@ app.post('/equipos', async (req, res) => {
     res.status(201).json({ msg: 'Equipo creado correctamente', equipo: result.rows[0] });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: 'Error al crear equipo' });
+    console.error("Error al crear equipo:", err); // ya lo hace
+    res.status(500).json({ msg: err.message, stack: err.stack });
   }
 });
 

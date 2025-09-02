@@ -462,13 +462,20 @@ app.post('/equipos', async (req, res) => {
     }
 
     // Insertar equipo
+    // Definir ubicación
+    let ubicacion = '';
+    if (ubicacion_tipo === 'puesto') ubicacion = 'puesto';
+    else if (ubicacion_tipo === 'area') ubicacion = 'area';
+
+    // Insertar equipo con el campo ubicacion
     const result = await pool.query(
       `INSERT INTO equipos
-       (nombre, descripcion, codigo_interno, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING *`,
-      [nombre, descripcion, codigo_interno, id_area, id_puesto, final_responsable_nombre, final_responsable_documento, id_tipo_equipo]
+      (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *`,
+      [nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, final_responsable_nombre, final_responsable_documento, id_tipo_equipo]
     );
+
 
     const id_equipo = result.rows[0].id;
 

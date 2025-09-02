@@ -340,7 +340,7 @@ app.get('/areas/:id/puestos', async (req, res) => {
 
 
 // ========================= EQUIPOS =========================
-
+// ========================= EQUIPOS =========================
 // Obtener todos los equipos
 app.get('/equipos', async (req, res) => {
   try {
@@ -348,27 +348,24 @@ app.get('/equipos', async (req, res) => {
       SELECT 
         e.id,
         e.codigo_interno,
-        e.nombre AS nombre_equipo,
+        e.nombre,
         e.descripcion,
-        e.estado,
-        e.marca,
-        e.serial,
+        e.ubicacion,
         e.area_id,
-        e.puesto_id,
+        e.id_puesto,
         -- 📌 Responsable: si tiene puesto se trae el del puesto, si no el de equipos
         CASE 
-          WHEN e.puesto_id IS NOT NULL THEN p.responsable
-          ELSE e.responsable
+          WHEN e.id_puesto IS NOT NULL THEN p.responsable_nombre
+          ELSE e.responsable_nombre
         END AS responsable,
         -- 📌 Ubicación: si tiene puesto se trae el nombre del puesto, si no el área
         CASE 
-          WHEN e.puesto_id IS NOT NULL THEN p.nombre
+          WHEN e.id_puesto IS NOT NULL THEN p.nombre
           ELSE a.nombre
         END AS ubicacion
       FROM equipos e
-      LEFT JOIN puestos p ON e.puesto_id = p.id
+      LEFT JOIN puestos p ON e.id_puesto = p.id
       LEFT JOIN areas a ON e.area_id = a.id
-      WHERE e.estado = 'activo'
       ORDER BY e.id DESC
     `;
 

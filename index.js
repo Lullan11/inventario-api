@@ -494,6 +494,66 @@ app.delete('/equipos/:id', async (req, res) => {
 });
 
 
+// ========================= TIPO DE EQUIPO Y CAMPOS PERSONALIZADOS =========================
+// POST /tipos-equipo
+app.post("/tipos-equipo", async (req, res) => {
+  const { nombre, campos } = req.body;
+
+  if (!nombre || !campos || campos.length === 0) {
+    return res.status(400).json({ msg: "Datos incompletos" });
+  }
+
+  try {
+    // 1️⃣ Guardar el tipo de equipo y obtener su ID
+    const tipoRes = await pool.query(
+      "INSERT INTO tipos_equipo(nombre) VALUES($1) RETURNING id",
+      [nombre]
+    );
+    const id_tipo_equipo = tipoRes.rows[0].id;
+
+    // 2️⃣ Guardar campos personalizados
+    const insertCampos = campos.map(campo =>
+      pool.query(
+        "INSERT INTO campos_personalizados(nombre_campo, tipo_dato, id_tipo_equipo) VALUES($1, $2, $3)",
+        [campo.nombre, campo.tipo_dato || "texto", id_tipo_equipo]
+      )
+    );
+
+    await Promise.all(insertCampos);
+
+    res.json({ msg: "Tipo de equipo y campos guardados correctamente", id_tipo_equipo });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Error al guardar tipo de equipo" });
+  }
+});
+
+
+// GET /tipos-equipo
+app.get("/tipos-equipo", async (req, res) => {
+  try {
+    const tiposRes = await pool.query("SELECT * FROM tipos_equipo ORDER BY id");
+    const tipos = tiposRes.rows;
+
+    for (let tipo of tipos) {
+      const camposRes = await pool.query(
+        "SELECT * FROM campos_personalizados WHERE id_tipo_equipo = $1 ORDER BY id",
+        [tipo.id]
+      );
+      tipo.campos = camposRes.rows;
+    }
+
+    res.json(tipos);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Error al obtener tipos de equipo" });
+  }
+});
+
+
+
+
+
 
 // Iniciar servidor
 app.listen(port, () => {

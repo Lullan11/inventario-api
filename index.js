@@ -344,9 +344,11 @@ app.get('/areas/:id/puestos', async (req, res) => {
 // ========================= EQUIPOS =========================
 
 // Obtener todos los equipos con área, sede y puesto
+// Obtener equipos, opcionalmente filtrando por puesto
 app.get('/equipos', async (req, res) => {
+  const { puesto_id } = req.query; // viene de ?puesto_id=123
   try {
-    const result = await pool.query(`
+    let query = `
       SELECT 
         e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
         e.responsable_nombre, e.responsable_documento,
@@ -358,14 +360,25 @@ app.get('/equipos', async (req, res) => {
       LEFT JOIN areas a ON e.id_area = a.id
       LEFT JOIN sedes s ON a.id_sede = s.id
       LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
-      ORDER BY e.id ASC
-    `);
+    `;
+
+    const params = [];
+    if (puesto_id) {
+      query += ` WHERE e.id_puesto = $1`;
+      params.push(puesto_id);
+    }
+
+    query += ` ORDER BY e.id ASC`;
+
+    const result = await pool.query(query, params);
     res.json(result.rows);
+
   } catch (error) {
     console.error('Error al obtener equipos:', error);
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
+
 
 // Obtener un equipo por ID
 app.get('/equipos/:id', async (req, res) => {

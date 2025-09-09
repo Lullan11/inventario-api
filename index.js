@@ -165,6 +165,23 @@ app.get('/areas/:id', async (req, res) => {
     res.status(500).json({ message: 'Error al obtener el área' });
   }
 });
+// Obtener equipos de un área
+app.get('/areas/:id/equipos', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT e.id, e.nombre, e.codigo_interno, e.responsable_nombre
+       FROM equipos e
+       WHERE e.id_area = $1`,
+      [id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error al obtener equipos del área:", err);
+    res.status(500).json({ error: "Error al obtener equipos" });
+  }
+});
+
 
 
 

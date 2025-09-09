@@ -165,14 +165,14 @@ app.get('/areas/:id', async (req, res) => {
     res.status(500).json({ message: 'Error al obtener el área' });
   }
 });
-// Obtener equipos de un área
+// Obtener equipos de un área (solo los que están directamente en el área)
 app.get('/areas/:id/equipos', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `SELECT e.id, e.nombre, e.codigo_interno, e.responsable_nombre
+      `SELECT e.id, e.nombre, e.codigo_interno, e.descripcion, e.responsable_nombre
        FROM equipos e
-       WHERE e.id_area = $1`,
+       WHERE e.id_area = $1 AND e.ubicacion = 'area'`,
       [id]
     );
     res.json(result.rows);

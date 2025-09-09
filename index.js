@@ -699,6 +699,115 @@ app.get('/ubicacion/:tipo/:id', async (req, res) => {
 
 
 
+// ========================= MANTENIMIENTOS PREVENTIVOS =========================
+
+// Registrar un mantenimiento preventivo (cuando validas)
+app.post('/mantenimientos/preventivos', async (req, res) => {
+  const { id_equipo, realizado_por } = req.body;
+
+  try {
+    const hoy = new Date().toISOString().split("T")[0];
+
+    // Guardar mantenimiento
+    const insert = await pool.query(
+      `INSERT INTO mantenimientos_preventivos (id_equipo, fecha, realizado_por)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [id_equipo, hoy, realizado_por]
+    );
+
+    // Buscar datos del equipo para recalcular próximo mantenimiento
+    const eqRes = await pool.query(
+      `SELECT intervalo_dias FROM equipos WHERE id=$1`,
+      [id_equipo]
+    );
+
+    if (eqRes.rows.length === 0) {
+      return res.status(404).json({ msg: "Equipo no encontrado" });
+    }
+
+    const intervalo = eqRes.rows[0].intervalo_dias;
+    let proximo_mantenimiento = null;
+    if (intervalo) {
+      const proxima = new Date(hoy);
+      proxima.setDate(proxima.getDate() + intervalo);
+      proximo_mantenimiento = proxima.toISOString().split("T")[0];
+    }
+
+    // Actualizar equipo con nueva fecha de próximo mantenimiento
+    await pool.query(
+      `UPDATE equipos SET proximo_mantenimiento=$1 WHERE id=$2`,
+      [proximo_mantenimiento, id_equipo]
+    );
+
+    res.json({
+      msg: "Mantenimiento preventivo registrado",
+      mantenimiento: insert.rows[0],
+      proximo_mantenimiento
+    });
+
+  } catch (err) {
+    console.error("Error al registrar mantenimiento preventivo:", err);
+    res.status(500).json({ msg: "Error al registrar mantenimiento preventivo" });
+  }
+});
+
+// Historial de mantenimientos preventivos de un equipo
+app.get('/mantenimientos/preventivos/:id_equipo', async (req, res) => {
+  try {
+    const { id_equipo } = req.params;
+    const result = await pool.query(
+      `SELECT * FROM mantenimientos_preventivos WHERE id_equipo=$1 ORDER BY fecha DESC`,
+      [id_equipo]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error al obtener mantenimientos preventivos:", err);
+    res.status(500).json({ msg: "Error al obtener mantenimientos preventivos" });
+  }
+});
+
+
+// ========================= MANTENIMIENTOS CORRECTIVOS =========================
+
+// Registrar un correctivo
+app.post('/mantenimientos/correctivos', async (req, res) => {
+  const { id_equipo, descripcion, realizado_por, observaciones } = req.body;
+
+  try {
+    const insert = await pool.query(
+      `INSERT INTO mantenimientos_correctivos (id_equipo, fecha, descripcion, realizado_por, observaciones)
+       VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
+      [id_equipo, descripcion, realizado_por, observaciones]
+    );
+
+    res.json({
+      msg: "Mantenimiento correctivo registrado",
+      mantenimiento: insert.rows[0]
+    });
+  } catch (err) {
+    console.error("Error al registrar mantenimiento correctivo:", err);
+    res.status(500).json({ msg: "Error al registrar mantenimiento correctivo" });
+  }
+});
+
+// Historial correctivos de un equipo
+app.get('/mantenimientos/correctivos/:id_equipo', async (req, res) => {
+  try {
+    const { id_equipo } = req.params;
+    const result = await pool.query(
+      `SELECT * FROM mantenimientos_correctivos WHERE id_equipo=$1 ORDER BY fecha DESC`,
+      [id_equipo]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error al obtener mantenimientos correctivos:", err);
+    res.status(500).json({ msg: "Error al obtener mantenimientos correctivos" });
+  }
+});
+
+
+
+
 // Iniciar servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);

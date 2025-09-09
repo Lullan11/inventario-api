@@ -345,6 +345,7 @@ app.get('/areas/:id/puestos', async (req, res) => {
 
 // Obtener todos los equipos con área, sede y puesto
 // Obtener equipos, opcionalmente filtrando por puesto
+// Obtener todos los equipos con área, sede y puesto
 app.get('/equipos', async (req, res) => {
   const { puesto_id } = req.query; // viene de ?puesto_id=123
   try {
@@ -355,6 +356,7 @@ app.get('/equipos', async (req, res) => {
         e.id_area, a.nombre AS area_nombre,
         e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
         e.id_tipo_equipo,
+        e.intervalo_dias, e.fecha_inicio_mantenimiento, e.proximo_mantenimiento,
         s.id AS id_sede, s.nombre AS sede_nombre
       FROM equipos e
       LEFT JOIN areas a ON e.id_area = a.id
@@ -371,13 +373,36 @@ app.get('/equipos', async (req, res) => {
     query += ` ORDER BY e.id ASC`;
 
     const result = await pool.query(query, params);
-    res.json(result.rows);
+
+    // 🟢 Calcular estado de mantenimiento
+    const hoy = new Date();
+    const equiposConEstado = result.rows.map(eq => {
+      let estado = "SIN_DATOS";
+
+      if (eq.proximo_mantenimiento) {
+        const proxima = new Date(eq.proximo_mantenimiento);
+        const diffDias = Math.ceil((proxima - hoy) / (1000 * 60 * 60 * 24));
+
+        if (diffDias > 10) {
+          estado = "OK";
+        } else if (diffDias > 0 && diffDias <= 10) {
+          estado = "PRÓXIMO";
+        } else {
+          estado = "VENCIDO";
+        }
+      }
+
+      return { ...eq, estado_mantenimiento: estado };
+    });
+
+    res.json(equiposConEstado);
 
   } catch (error) {
     console.error('Error al obtener equipos:', error);
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
+
 
 
 // Obtener un equipo por ID

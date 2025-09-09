@@ -437,17 +437,20 @@ app.get('/equipos/:id', async (req, res) => {
 
 // crear equipo
 // Crear un equipo
+// Crear un equipo
 app.post('/equipos', async (req, res) => {
   const {
     nombre,
     descripcion,
-    codigo_interno,      // ahora se ingresa directamente
-    ubicacion_tipo,      // 'area' o 'puesto'
-    id_ubicacion,        // id del área o puesto
+    codigo_interno,
+    ubicacion_tipo,
+    id_ubicacion,
     responsable_nombre,
     responsable_documento,
     id_tipo_equipo,
-    campos_personalizados // { nombre_campo: valor, ... }
+    campos_personalizados,
+    intervalo_dias,                // 🟢 ahora sí lo leemos del body
+    fecha_inicio_mantenimiento     // 🟢 ahora sí lo leemos del body
   } = req.body;
 
   try {
@@ -468,39 +471,44 @@ app.post('/equipos', async (req, res) => {
       id_puesto = id_ubicacion;
       id_area = puesto.rows[0].id_area;
 
-      // Si no se envía responsable, se toma del puesto
       if (!final_responsable_nombre) final_responsable_nombre = puesto.rows[0].responsable_nombre;
       if (!final_responsable_documento) final_responsable_documento = puesto.rows[0].responsable_documento;
 
     } else if (ubicacion_tipo === 'area') {
-      const area = await pool.query(
-        'SELECT id FROM areas WHERE id=$1',
-        [id_ubicacion]
-      );
+      const area = await pool.query('SELECT id FROM areas WHERE id=$1', [id_ubicacion]);
       if (area.rows.length === 0)
         return res.status(404).json({ msg: 'Área no encontrada' });
 
       id_area = id_ubicacion;
-      // responsable se completa manualmente desde el body
     } else {
       return res.status(400).json({ msg: 'Tipo de ubicación inválido' });
     }
 
-    // Insertar equipo
     // Definir ubicación
-    let ubicacion = '';
-    if (ubicacion_tipo === 'puesto') ubicacion = 'puesto';
-    else if (ubicacion_tipo === 'area') ubicacion = 'area';
+    let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
-    // Insertar equipo con el campo ubicacion
+    // 🟢 Calcular próxima fecha de mantenimiento
+    let proximo_mantenimiento = null;
+    if (intervalo_dias && fecha_inicio_mantenimiento) {
+      const inicio = new Date(fecha_inicio_mantenimiento);
+      inicio.setDate(inicio.getDate() + parseInt(intervalo_dias));
+      proximo_mantenimiento = inicio.toISOString().split('T')[0];
+    }
+
+    // 🟢 Insertar equipo con campos de mantenimiento incluidos
     const result = await pool.query(
       `INSERT INTO equipos
-      (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
+       responsable_nombre, responsable_documento, id_tipo_equipo,
+       intervalo_dias, fecha_inicio_mantenimiento, proximo_mantenimiento)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *`,
-      [nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, final_responsable_nombre, final_responsable_documento, id_tipo_equipo]
+      [
+        nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
+        final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
+        intervalo_dias, fecha_inicio_mantenimiento, proximo_mantenimiento
+      ]
     );
-
 
     const id_equipo = result.rows[0].id;
 
@@ -521,10 +529,11 @@ app.post('/equipos', async (req, res) => {
     res.status(201).json({ msg: 'Equipo creado correctamente', equipo: result.rows[0] });
 
   } catch (err) {
-    console.error("Error al crear equipo:", err); // ya lo hace
+    console.error("Error al crear equipo:", err);
     res.status(500).json({ msg: err.message, stack: err.stack });
   }
 });
+
 
 
 // Actualizar un equipo

@@ -807,6 +807,76 @@ app.get('/mantenimientos/correctivos/:id_equipo', async (req, res) => {
 
 
 
+// ========================= EQUIPOS CON CAMPOS PERSONALIZADOS =========================
+
+// Obtener un equipo por ID (con campos personalizados + mantenimiento)
+app.get('/equipos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Traemos los datos principales del equipo
+    const result = await pool.query(`
+      SELECT 
+        e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
+        e.responsable_nombre, e.responsable_documento,
+        e.id_area, a.nombre AS area_nombre,
+        e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
+        e.id_tipo_equipo,
+        e.intervalo_dias, e.fecha_inicio_mantenimiento, e.proximo_mantenimiento,
+        s.id AS id_sede, s.nombre AS sede_nombre
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN sedes s ON a.id_sede = s.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      WHERE e.id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Equipo no encontrado' });
+    }
+
+    const equipo = result.rows[0];
+
+    // 🟢 Traemos valores personalizados del equipo
+    const camposRes = await pool.query(`
+      SELECT c.nombre_campo, v.valor
+      FROM valores_personalizados v
+      JOIN campos_personalizados c ON v.id_campo = c.id
+      WHERE v.id_equipo = $1
+    `, [id]);
+
+    equipo.campos_personalizados = {};
+    camposRes.rows.forEach(c => {
+      equipo.campos_personalizados[c.nombre_campo] = c.valor;
+    });
+
+    // 🟢 Calcular estado de mantenimiento
+    let estado = "SIN_DATOS";
+    if (equipo.proximo_mantenimiento) {
+      const hoy = new Date();
+      const proxima = new Date(equipo.proximo_mantenimiento);
+      const diffDias = Math.ceil((proxima - hoy) / (1000 * 60 * 60 * 24));
+
+      if (diffDias > 10) {
+        estado = "OK";
+      } else if (diffDias > 0 && diffDias <= 10) {
+        estado = "PRÓXIMO";
+      } else {
+        estado = "VENCIDO";
+      }
+    }
+    equipo.estado_mantenimiento = estado;
+
+    res.json(equipo);
+
+  } catch (error) {
+    console.error('Error al obtener equipo con campos personalizados:', error);
+    res.status(500).json({ error: 'Error al obtener equipo' });
+  }
+});
+
+
+
+
 
 // Iniciar servidor
 app.listen(port, () => {

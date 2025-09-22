@@ -75,12 +75,20 @@ app.post("/usuarios/login", async (req, res) => {
   }
 });
 
-const nodemailer = require("nodemailer");
-const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 
-// Solicitar recuperación de contraseña
-app.post("/usuarios/forgot-password", async (req, res) => {
-  const { email } = req.body;
+
+
+
+
+
+// Restablecer contraseña directamente (sin token)
+app.post("/usuarios/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  if (!email || !newPassword) {
+    return res.status(400).json({ error: "Correo y nueva contraseña son requeridos" });
+  }
 
   try {
     const result = await pool.query("SELECT * FROM usuarios WHERE email=$1", [email]);
@@ -88,68 +96,8 @@ app.post("/usuarios/forgot-password", async (req, res) => {
       return res.status(400).json({ error: "Usuario no encontrado" });
     }
 
-    const usuario = result.rows[0];
-
-    // Generar token temporal
-    const token = crypto.randomBytes(20).toString("hex");
-    const expires = new Date(Date.now() + 3600000); // 1 hora de expiración
-
-    // Guardar token y fecha de expiración en la BD
-    await pool.query(
-      "UPDATE usuarios SET reset_token=$1, reset_expires=$2 WHERE email=$3",
-      [token, expires, email]
-    );
-
-    // Configurar Nodemailer
-    const transporter = nodemailer.createTransport({
-      host: "smtp.tucorreo.com", // ej: smtp.gmail.com
-      port: 587,
-      secure: false,
-      auth: {
-        user: "tucorreo@ejemplo.com",
-        pass: "tu_contraseña_app", // si Gmail, crear contraseña de app
-      },
-    });
-
-    const resetURL = `https://tusitio.com/reset-password?token=${token}&email=${email}`;
-
-    // Enviar correo
-    await transporter.sendMail({
-      from: '"IPS Progresando" <tucorreo@ejemplo.com>',
-      to: email,
-      subject: "Recuperación de contraseña",
-      html: `<p>Haz clic <a href="${resetURL}">aquí</a> para restablecer tu contraseña. El enlace expira en 1 hora.</p>`,
-    });
-
-    res.json({ message: "Correo de recuperación enviado" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al enviar correo" });
-  }
-});
-
-
-
-
-app.post("/usuarios/reset-password-token", async (req, res) => {
-  const { email, token, newPassword } = req.body;
-
-  try {
-    const result = await pool.query(
-      "SELECT * FROM usuarios WHERE email=$1 AND reset_token=$2 AND reset_expires > NOW()",
-      [email, token]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: "Token inválido o expirado" });
-    }
-
     const hashed = await bcrypt.hash(newPassword, 10);
-
-    await pool.query(
-      "UPDATE usuarios SET password=$1, reset_token=NULL, reset_expires=NULL WHERE email=$2",
-      [hashed, email]
-    );
+    await pool.query("UPDATE usuarios SET password=$1 WHERE email=$2", [hashed, email]);
 
     res.json({ message: "Contraseña restablecida correctamente" });
   } catch (err) {
@@ -157,6 +105,7 @@ app.post("/usuarios/reset-password-token", async (req, res) => {
     res.status(500).json({ error: "Error al restablecer contraseña" });
   }
 });
+
 
 
 

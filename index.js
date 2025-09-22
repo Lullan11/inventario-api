@@ -13,6 +13,80 @@ app.get('/', (req, res) => {
   res.send('¡La API está funcionando!');
 });
 
+
+
+
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+
+// Registrar usuario
+app.post("/usuarios/register", async (req, res) => {
+  const { nombre, email, password } = req.body;
+  try {
+    const hashed = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      "INSERT INTO usuarios (nombre, email, password) VALUES ($1,$2,$3) RETURNING id, nombre, email",
+      [nombre, email, hashed]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Error registrando usuario:", err);
+    res.status(500).json({ error: "Error al registrar usuario" });
+  }
+});
+
+// Login
+app.post("/usuarios/login", async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const result = await pool.query("SELECT * FROM usuarios WHERE email=$1", [email]);
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: "Usuario no encontrado" });
+    }
+    const usuario = result.rows[0];
+    const valid = await bcrypt.compare(password, usuario.password);
+    if (!valid) {
+      return res.status(400).json({ error: "Contraseña incorrecta" });
+    }
+
+    const token = jwt.sign({ id: usuario.id }, "mi_secreto", { expiresIn: "1h" });
+
+    res.json({
+      message: "Login exitoso",
+      usuario: { id: usuario.id, nombre: usuario.nombre, email: usuario.email },
+      token,
+    });
+  } catch (err) {
+    console.error("Error en login:", err);
+    res.status(500).json({ error: "Error en login" });
+  }
+});
+
+// Resetear contraseña
+app.post("/usuarios/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+  try {
+    const result = await pool.query("SELECT * FROM usuarios WHERE email=$1", [email]);
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: "Usuario no encontrado" });
+    }
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.query("UPDATE usuarios SET password=$1 WHERE email=$2", [hashed, email]);
+    res.json({ message: "Contraseña actualizada correctamente" });
+  } catch (err) {
+    console.error("Error reseteando contraseña:", err);
+    res.status(500).json({ error: "Error al resetear contraseña" });
+  }
+});
+
+
+
+
+
+
+
+
+
 // ✅ Ruta para obtener todas las sedes (debe estar antes de app.listen)
 app.get('/sedes', async (req, res) => {
   try {

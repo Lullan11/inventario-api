@@ -75,34 +75,38 @@ app.post("/usuarios/login", async (req, res) => {
   }
 });
 
-const bcrypt = require("bcryptjs");
-
-
-
-
-
-
-// Restablecer contraseña directamente (sin token)
+// Endpoint para restablecer contraseña sin token
 app.post("/usuarios/reset-password", async (req, res) => {
   const { email, newPassword } = req.body;
 
+  // Validaciones básicas
   if (!email || !newPassword) {
     return res.status(400).json({ error: "Correo y nueva contraseña son requeridos" });
   }
 
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+  }
+
   try {
-    const result = await pool.query("SELECT * FROM usuarios WHERE email=$1", [email]);
+    // Verificar si el usuario existe
+    const result = await pool.query("SELECT id FROM usuarios WHERE email=$1", [email]);
     if (result.rows.length === 0) {
-      return res.status(400).json({ error: "Usuario no encontrado" });
+      return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    const hashed = await bcrypt.hash(newPassword, 10);
-    await pool.query("UPDATE usuarios SET password=$1 WHERE email=$2", [hashed, email]);
+    // Hashear la nueva contraseña
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    res.json({ message: "Contraseña restablecida correctamente" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al restablecer contraseña" });
+    // Actualizar contraseña en la base de datos
+    await pool.query("UPDATE usuarios SET password=$1 WHERE email=$2", [hashedPassword, email]);
+
+    // Respuesta exitosa
+    return res.json({ message: "Contraseña restablecida correctamente" });
+
+  } catch (error) {
+    console.error("Error al restablecer contraseña:", error);
+    return res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 

@@ -21,17 +21,23 @@ const jwt = require("jsonwebtoken");
 
 // Registrar usuario
 app.post("/usuarios/register", async (req, res) => {
-  const { nombre, email, password } = req.body;
+  const { nombre, documento, email, password } = req.body;
   try {
     const hashed = await bcrypt.hash(password, 10);
+
     const result = await pool.query(
-      "INSERT INTO usuarios (nombre, email, password) VALUES ($1,$2,$3) RETURNING id, nombre, email",
-      [nombre, email, hashed]
+      "INSERT INTO usuarios (nombre, documento, email, password) VALUES ($1,$2,$3,$4) RETURNING id, nombre, documento, email",
+      [nombre, documento, email, hashed]
     );
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error("Error registrando usuario:", err);
-    res.status(500).json({ error: "Error al registrar usuario" });
+    if (err.code === "23505") {
+      res.status(400).json({ error: "El correo o documento ya están registrados" });
+    } else {
+      res.status(500).json({ error: "Error al registrar usuario" });
+    }
   }
 });
 
@@ -43,17 +49,24 @@ app.post("/usuarios/login", async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(400).json({ error: "Usuario no encontrado" });
     }
+
     const usuario = result.rows[0];
     const valid = await bcrypt.compare(password, usuario.password);
+
     if (!valid) {
       return res.status(400).json({ error: "Contraseña incorrecta" });
     }
 
-    const token = jwt.sign({ id: usuario.id }, "mi_secreto", { expiresIn: "1h" });
+    const token = jwt.sign({ id: usuario.id }, process.env.JWT_SECRET || "mi_secreto", { expiresIn: "1h" });
 
     res.json({
       message: "Login exitoso",
-      usuario: { id: usuario.id, nombre: usuario.nombre, email: usuario.email },
+      usuario: {
+        id: usuario.id,
+        nombre: usuario.nombre,
+        documento: usuario.documento,
+        email: usuario.email,
+      },
       token,
     });
   } catch (err) {
@@ -70,8 +83,10 @@ app.post("/usuarios/reset-password", async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(400).json({ error: "Usuario no encontrado" });
     }
+
     const hashed = await bcrypt.hash(newPassword, 10);
     await pool.query("UPDATE usuarios SET password=$1 WHERE email=$2", [hashed, email]);
+
     res.json({ message: "Contraseña actualizada correctamente" });
   } catch (err) {
     console.error("Error reseteando contraseña:", err);

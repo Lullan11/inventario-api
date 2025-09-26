@@ -133,17 +133,38 @@ app.get("/stats/total-equipos", async (req, res) => {
   }
 });
 
-// Total oficinas (áreas o sedes según tu modelo)
-app.get("/stats/total-oficinas", async (req, res) => {
+// Total areas
+app.get("/stats/total-areas", async (req, res) => {
   try {
     const result = await pool.query("SELECT COUNT(*) FROM areas");
     res.json({ total: result.rows[0].count });
   } catch (err) {
-    console.error("Error obteniendo total oficinas:", err);
+    console.error("Error obteniendo total areas:", err);
     res.status(500).json({ error: "Error en el servidor" });
   }
 });
 
+// Total sedes
+app.get("/stats/total-sedes", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT COUNT(*) FROM sedes");
+    res.json({ total: result.rows[0].count });
+  } catch (err) {
+    console.error("Error obteniendo total sedes:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// Total puestos
+app.get("/stats/total-puestos", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT COUNT(*) FROM puestos_trabajo");
+    res.json({ total: result.rows[0].count });
+  } catch (err) {
+    console.error("Error obteniendo total puestos de trabajo:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
 
 
 

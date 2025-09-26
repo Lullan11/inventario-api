@@ -8,10 +8,14 @@ const pool = require('./db');
 // Middleware para aceptar JSON
 app.use(express.json());
 
+const cors = require("cors");
+app.use(cors());
+
 // Ruta de prueba para verificar que todo funciona
 app.get('/', (req, res) => {
   res.send('¡La API está funcionando!');
 });
+
 
 
 

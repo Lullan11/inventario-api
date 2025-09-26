@@ -121,6 +121,38 @@ app.post("/usuarios/reset-password", async (req, res) => {
 
 
 
+
+// Total equipos
+app.get("/stats/total-equipos", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT COUNT(*) FROM equipos");
+    res.json({ total: result.rows[0].count });
+  } catch (err) {
+    console.error("Error obteniendo total equipos:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// Total oficinas (áreas o sedes según tu modelo)
+app.get("/stats/total-oficinas", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT COUNT(*) FROM areas");
+    res.json({ total: result.rows[0].count });
+  } catch (err) {
+    console.error("Error obteniendo total oficinas:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
 // ✅ Ruta para obtener todas las sedes (debe estar antes de app.listen)
 app.get('/sedes', async (req, res) => {
   try {

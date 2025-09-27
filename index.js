@@ -113,7 +113,7 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     );
 
     // Crear el enlace de recuperación
-    const resetUrl = `https://tu-dominio.com/reset-password?token=${token}&email=${email}`;
+    const resetUrl = `https://inventario-api-gw73.onrender.com/reset-password?token=${token}&email=${email}`;
 
     // Configurar el transportador de correo (usando Nodemailer)
     const transporter = nodemailer.createTransport({
@@ -125,7 +125,7 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     });
 
     const mailOptions = {
-      from: 'tu-email@gmail.com',
+      from: 'devprogresandoips@gmail.com',
       to: email,
       subject: 'Recuperación de Contraseña',
       text: `Hola, para restablecer tu contraseña, haz clic en el siguiente enlace: ${resetUrl}`,

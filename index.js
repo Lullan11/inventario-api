@@ -1,29 +1,27 @@
 const express = require('express');
-const app = express();
-const port = 3000;
-
-// Importamos la conexión desde db.js
-const pool = require('./db');
-
-// Middleware para aceptar JSON
-app.use(express.json());
-
 const cors = require("cors");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+
+const pool = require('./db'); // conexión a la BD
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Middleware
+app.use(express.json());
 app.use(cors());
 
-// Ruta de prueba para verificar que todo funciona
+// Ruta de prueba
 app.get('/', (req, res) => {
   res.send('¡La API está funcionando!');
 });
 
-
-
-
-
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-
-// Registrar usuario
+// ====================
+// REGISTRO DE USUARIO
+// ====================
 app.post("/usuarios/register", async (req, res) => {
   const { nombre, documento, email, password } = req.body;
   try {
@@ -45,7 +43,9 @@ app.post("/usuarios/register", async (req, res) => {
   }
 });
 
-// Login
+// ====================
+// LOGIN DE USUARIO
+// ====================
 app.post("/usuarios/login", async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -61,7 +61,11 @@ app.post("/usuarios/login", async (req, res) => {
       return res.status(400).json({ error: "Contraseña incorrecta" });
     }
 
-    const token = jwt.sign({ id: usuario.id }, process.env.JWT_SECRET || "mi_secreto", { expiresIn: "1h" });
+    const token = jwt.sign(
+      { id: usuario.id },
+      process.env.JWT_SECRET || "mi_secreto",
+      { expiresIn: "1h" }
+    );
 
     res.json({
       message: "Login exitoso",
@@ -79,13 +83,9 @@ app.post("/usuarios/login", async (req, res) => {
   }
 });
 
-
-
-// Endpoint para restablecer contraseña sin token
-const crypto = require('crypto');
-const nodemailer = require('nodemailer');
-
-// Endpoint para solicitar el enlace de recuperación
+// ====================
+// OLVIDÉ CONTRASEÑA
+// ====================
 app.post("/usuarios/forgot-password", async (req, res) => {
   const { email } = req.body;
 
@@ -94,7 +94,6 @@ app.post("/usuarios/forgot-password", async (req, res) => {
   }
 
   try {
-    // Buscar usuario en la base de datos
     const result = await pool.query("SELECT id, email FROM usuarios WHERE email=$1", [email]);
     if (result.rows.length === 0) {
       return res.status(400).json({ error: "Correo no registrado." });
@@ -102,39 +101,41 @@ app.post("/usuarios/forgot-password", async (req, res) => {
 
     const usuario = result.rows[0];
 
-    // Generar un token único para la recuperación
-    const token = crypto.randomBytes(32).toString('hex'); // Generar token
-    const expires = Date.now() + 3600000; // 1 hora de expiración
+    // Generar token y fecha de expiración
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 3600000); // 1 hora desde ahora
 
-    // Guardar el token y la fecha de expiración en la base de datos
     await pool.query(
       "UPDATE usuarios SET reset_token=$1, reset_token_expires=$2 WHERE email=$3",
       [token, expires, email]
     );
 
-    // Crear el enlace de recuperación
+    // Crear enlace de recuperación
     const resetUrl = `http://127.0.0.1:5500/src/views/reset-password.html?token=${token}&email=${email}`;
 
-    // Configurar el transportador de correo (usando Nodemailer)
+    // Configurar nodemailer
+    // Configurar nodemailer con Brevo
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: process.env.EMAIL_HOST,
+      port: process.env.EMAIL_PORT,
+      secure: false, // en 587 se usa STARTTLS
       auth: {
-        user: "devprogresandoips@gmail.com",
-        pass: "05juank11", // contraseña de aplicación de Google
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
     });
 
-
     const mailOptions = {
-      from: 'devprogresandoips@gmail.com',
+      from: process.env.EMAIL_FROM,
       to: email,
       subject: 'Recuperación de Contraseña',
-      text: `Hola, para restablecer tu contraseña, haz clic en el siguiente enlace: ${resetUrl}`,
-      html: `<p>Hola, para restablecer tu contraseña, haz clic en el siguiente enlace:</p><a href="${resetUrl}">${resetUrl}</a>`
+      text: `Hola, para restablecer tu contraseña, haz clic en este enlace: ${resetUrl}`,
+      html: `<p>Hola, para restablecer tu contraseña haz clic aquí:</p>
+         <a href="${resetUrl}">${resetUrl}</a>`,
     };
 
-    // Enviar el correo
     await transporter.sendMail(mailOptions);
+
 
     res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
   } catch (error) {
@@ -142,7 +143,10 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
-// cambio de contraseña usando el token
+
+// ====================
+// RESET DE CONTRASEÑA
+// ====================
 app.post("/usuarios/reset-password", async (req, res) => {
   const { token, email, newPassword } = req.body;
 
@@ -151,24 +155,27 @@ app.post("/usuarios/reset-password", async (req, res) => {
   }
 
   try {
-    // Verificar si el token y el email son válidos
-    const result = await pool.query("SELECT * FROM usuarios WHERE email=$1 AND reset_token=$2", [email, token]);
+    const result = await pool.query(
+      "SELECT * FROM usuarios WHERE email=$1 AND reset_token=$2",
+      [email, token]
+    );
+
     if (result.rows.length === 0) {
       return res.status(400).json({ error: "Token o correo incorrectos." });
     }
 
     const usuario = result.rows[0];
 
-    // Verificar si el token ha expirado
-    if (usuario.reset_token_expires < Date.now()) {
+    if (usuario.reset_token_expires < new Date()) {
       return res.status(400).json({ error: "El enlace de recuperación ha expirado." });
     }
 
-    // Hashear la nueva contraseña
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Actualizar la contraseña en la base de datos
-    await pool.query("UPDATE usuarios SET password=$1, reset_token=NULL, reset_token_expires=NULL WHERE email=$2", [hashedPassword, email]);
+    await pool.query(
+      "UPDATE usuarios SET password=$1, reset_token=NULL, reset_token_expires=NULL WHERE email=$2",
+      [hashedPassword, email]
+    );
 
     res.json({ message: "Contraseña actualizada correctamente." });
   } catch (error) {
@@ -176,6 +183,7 @@ app.post("/usuarios/reset-password", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
+
 
 
 

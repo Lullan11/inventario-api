@@ -113,16 +113,17 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     );
 
     // Crear el enlace de recuperación
-    const resetUrl = `https://inventario-api-gw73.onrender.com/reset-password?token=${token}&email=${email}`;
+    const resetUrl = `http://127.0.0.1:5500/src/views/reset-password.html?token=${token}&email=${email}`;
 
     // Configurar el transportador de correo (usando Nodemailer)
     const transporter = nodemailer.createTransport({
-      service: 'gmail', // o cualquier servicio que uses
+      service: "gmail",
       auth: {
-        user: 'tu-email@gmail.com',
-        pass: 'tu-password',
-      }
+        user: "devprogresandoips@gmail.com",
+        pass: "05juank11", // contraseña de aplicación de Google
+      },
     });
+
 
     const mailOptions = {
       from: 'devprogresandoips@gmail.com',

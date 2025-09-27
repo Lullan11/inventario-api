@@ -79,43 +79,102 @@ app.post("/usuarios/login", async (req, res) => {
   }
 });
 
+
+
 // Endpoint para restablecer contraseña sin token
-app.post("/usuarios/reset-password", async (req, res) => {
-  const { email, newPassword } = req.body;
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
-  // Validaciones básicas
-  if (!email || !newPassword) {
-    return res.status(400).json({ error: "Correo y nueva contraseña son requeridos" });
-  }
+// Endpoint para solicitar el enlace de recuperación
+app.post("/usuarios/forgot-password", async (req, res) => {
+  const { email } = req.body;
 
-  if (newPassword.length < 6) {
-    return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+  if (!email) {
+    return res.status(400).json({ error: "Correo electrónico es necesario." });
   }
 
   try {
-    // Verificar si el usuario existe
-    const result = await pool.query("SELECT id FROM usuarios WHERE email=$1", [email]);
+    // Buscar usuario en la base de datos
+    const result = await pool.query("SELECT id, email FROM usuarios WHERE email=$1", [email]);
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
+      return res.status(400).json({ error: "Correo no registrado." });
+    }
+
+    const usuario = result.rows[0];
+
+    // Generar un token único para la recuperación
+    const token = crypto.randomBytes(32).toString('hex'); // Generar token
+    const expires = Date.now() + 3600000; // 1 hora de expiración
+
+    // Guardar el token y la fecha de expiración en la base de datos
+    await pool.query(
+      "UPDATE usuarios SET reset_token=$1, reset_token_expires=$2 WHERE email=$3",
+      [token, expires, email]
+    );
+
+    // Crear el enlace de recuperación
+    const resetUrl = `https://tu-dominio.com/reset-password?token=${token}&email=${email}`;
+
+    // Configurar el transportador de correo (usando Nodemailer)
+    const transporter = nodemailer.createTransport({
+      service: 'gmail', // o cualquier servicio que uses
+      auth: {
+        user: 'tu-email@gmail.com',
+        pass: 'tu-password',
+      }
+    });
+
+    const mailOptions = {
+      from: 'tu-email@gmail.com',
+      to: email,
+      subject: 'Recuperación de Contraseña',
+      text: `Hola, para restablecer tu contraseña, haz clic en el siguiente enlace: ${resetUrl}`,
+      html: `<p>Hola, para restablecer tu contraseña, haz clic en el siguiente enlace:</p><a href="${resetUrl}">${resetUrl}</a>`
+    };
+
+    // Enviar el correo
+    await transporter.sendMail(mailOptions);
+
+    res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
+  } catch (error) {
+    console.error("Error al enviar el enlace de recuperación:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+// cambio de contraseña usando el token
+app.post("/usuarios/reset-password", async (req, res) => {
+  const { token, email, newPassword } = req.body;
+
+  if (!token || !email || !newPassword) {
+    return res.status(400).json({ error: "Faltan parámetros." });
+  }
+
+  try {
+    // Verificar si el token y el email son válidos
+    const result = await pool.query("SELECT * FROM usuarios WHERE email=$1 AND reset_token=$2", [email, token]);
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: "Token o correo incorrectos." });
+    }
+
+    const usuario = result.rows[0];
+
+    // Verificar si el token ha expirado
+    if (usuario.reset_token_expires < Date.now()) {
+      return res.status(400).json({ error: "El enlace de recuperación ha expirado." });
     }
 
     // Hashear la nueva contraseña
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Actualizar contraseña en la base de datos
-    await pool.query("UPDATE usuarios SET password=$1 WHERE email=$2", [hashedPassword, email]);
+    // Actualizar la contraseña en la base de datos
+    await pool.query("UPDATE usuarios SET password=$1, reset_token=NULL, reset_token_expires=NULL WHERE email=$2", [hashedPassword, email]);
 
-    // Respuesta exitosa
-    return res.json({ message: "Contraseña restablecida correctamente" });
-
+    res.json({ message: "Contraseña actualizada correctamente." });
   } catch (error) {
-    console.error("Error al restablecer contraseña:", error);
-    return res.status(500).json({ error: "Error interno del servidor" });
+    console.error("Error al restablecer la contraseña:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
-
-
-
 
 
 

@@ -4,7 +4,6 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const { Resend } = require("resend");
 
 const pool = require("./db"); // conexión a la BD
 
@@ -16,11 +15,8 @@ app.use(express.json());
 app.use(cors());
 
 // ====================
-// Inicializar Resend
-// ====================
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 // Ruta de prueba
+// ====================
 app.get("/", (req, res) => {
   res.send("¡La API está funcionando!");
 });
@@ -29,13 +25,19 @@ app.get("/", (req, res) => {
 // REGISTRO DE USUARIO
 // ====================
 app.post("/usuarios/register", async (req, res) => {
-  const { nombre, documento, email, password } = req.body;
+  const { nombre, documento, email, password, security_question, security_answer } = req.body;
   try {
-    const hashed = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedAnswer = await bcrypt.hash(security_answer, 10);
+
     const result = await pool.query(
-      "INSERT INTO usuarios (nombre, documento, email, password) VALUES ($1,$2,$3,$4) RETURNING id, nombre, documento, email",
-      [nombre, documento, email, hashed]
+      `INSERT INTO usuarios 
+      (nombre, documento, email, password, security_question, security_answer) 
+      VALUES ($1,$2,$3,$4,$5,$6) 
+      RETURNING id, nombre, documento, email`,
+      [nombre, documento, email, hashedPassword, security_question, hashedAnswer]
     );
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error("Error registrando usuario:", err);
@@ -73,56 +75,42 @@ app.post("/usuarios/login", async (req, res) => {
 });
 
 // ====================
-// OLVIDÉ CONTRASEÑA (Resend API)
+// OBTENER PREGUNTA SECRETA
 // ====================
-app.post("/usuarios/forgot-password", async (req, res) => {
+app.post("/usuarios/get-security-question", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "Correo electrónico es necesario." });
 
   try {
-    const result = await pool.query("SELECT id, email FROM usuarios WHERE email=$1", [email]);
-    if (result.rows.length === 0) return res.status(400).json({ error: "Correo no registrado." });
+    const result = await pool.query("SELECT security_question FROM usuarios WHERE email=$1", [email]);
+    if (result.rows.length === 0) return res.status(400).json({ error: "Usuario no encontrado" });
 
-    const token = crypto.randomBytes(32).toString("hex");
-    const expires = new Date(Date.now() + 3600000); // 1 hora
-
-    await pool.query("UPDATE usuarios SET reset_token=$1, reset_token_expires=$2 WHERE email=$3", [token, expires, email]);
-
-    const resetUrl = `http://127.0.0.1:5500/src/views/reset-password.html?token=${token}&email=${email}`;
-
-    await resend.emails.send({
-      from: process.env.EMAIL_FROM,
-      to: email,
-      subject: "Recuperación de Contraseña",
-      html: `<p>Hola,</p>
-             <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
-             <a href="${resetUrl}">${resetUrl}</a>
-             <p>Este enlace expira en 1 hora.</p>`,
-    });
-
-    res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
+    res.json({ question: result.rows[0].security_question });
   } catch (error) {
-    console.error("Error al enviar el enlace de recuperación:", error);
+    console.error("Error obteniendo pregunta secreta:", error);
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
 // ====================
-// RESET DE CONTRASEÑA
+// VERIFICAR RESPUESTA SECRETA Y CAMBIAR CONTRASEÑA
 // ====================
-app.post("/usuarios/reset-password", async (req, res) => {
-  const { token, email, newPassword } = req.body;
-  if (!token || !email || !newPassword) return res.status(400).json({ error: "Faltan parámetros." });
+app.post("/usuarios/verify-security-answer", async (req, res) => {
+  const { email, answer, newPassword } = req.body;
+
+  if (!email || !answer || !newPassword)
+    return res.status(400).json({ error: "Faltan parámetros" });
 
   try {
-    const result = await pool.query("SELECT * FROM usuarios WHERE email=$1 AND reset_token=$2", [email, token]);
-    if (result.rows.length === 0) return res.status(400).json({ error: "Token o correo incorrectos." });
+    const result = await pool.query("SELECT security_answer FROM usuarios WHERE email=$1", [email]);
+    if (result.rows.length === 0) return res.status(400).json({ error: "Usuario no encontrado" });
 
     const usuario = result.rows[0];
-    if (usuario.reset_token_expires < new Date()) return res.status(400).json({ error: "El enlace de recuperación ha expirado." });
+    const valid = await bcrypt.compare(answer, usuario.security_answer);
+    if (!valid) return res.status(400).json({ error: "Respuesta incorrecta" });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await pool.query("UPDATE usuarios SET password=$1, reset_token=NULL, reset_token_expires=NULL WHERE email=$2", [hashedPassword, email]);
+    await pool.query("UPDATE usuarios SET password=$1 WHERE email=$2", [hashedPassword, email]);
 
     res.json({ message: "Contraseña actualizada correctamente." });
   } catch (error) {
@@ -130,8 +118,6 @@ app.post("/usuarios/reset-password", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
-
-
 
 
 

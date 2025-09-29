@@ -102,8 +102,8 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     const usuario = result.rows[0];
 
     // Generar token y fecha de expiración
-    const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 3600000); // 1 hora desde ahora
+    const token = crypto.randomBytes(32).toString("hex");
+    const expires = new Date(Date.now() + 3600000); // 1 hora
 
     await pool.query(
       "UPDATE usuarios SET reset_token=$1, reset_token_expires=$2 WHERE email=$3",
@@ -113,29 +113,28 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     // Crear enlace de recuperación
     const resetUrl = `http://127.0.0.1:5500/src/views/reset-password.html?token=${token}&email=${email}`;
 
-    // Configurar nodemailer
-    // Configurar nodemailer con Brevo
+    // Transportador SMTP Brevo (directo)
     const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: process.env.EMAIL_PORT,
-      secure: false, // en 587 se usa STARTTLS
+      host: "smtp-relay.brevo.com",
+      port: 587,
+      secure: false,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: "9801be001@smtp-brevo.com",
+        pass: "ZyT9BRx8NJVYbq2s",
       },
     });
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: '"Progresando IPS" <devprogresandoips@gmail.com>', // remitente autorizado en Brevo
       to: email,
-      subject: 'Recuperación de Contraseña',
+      subject: "Recuperación de Contraseña",
       text: `Hola, para restablecer tu contraseña, haz clic en este enlace: ${resetUrl}`,
       html: `<p>Hola, para restablecer tu contraseña haz clic aquí:</p>
-         <a href="${resetUrl}">${resetUrl}</a>`,
+             <a href="${resetUrl}">${resetUrl}</a>`,
     };
 
-    await transporter.sendMail(mailOptions);
-
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Correo enviado:", info.messageId);
 
     res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
   } catch (error) {
@@ -143,6 +142,7 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
+
 
 // ====================
 // RESET DE CONTRASEÑA

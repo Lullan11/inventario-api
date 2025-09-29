@@ -1,11 +1,12 @@
-const express = require('express');
+require("dotenv").config();
+const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const crypto = require('crypto');
-const { Resend } = require("resend");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 
-const pool = require('./db'); // conexión a la BD
+const pool = require("./db"); // conexión a la BD
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -14,12 +15,20 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 app.use(cors());
 
-// Inicializar Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ====================
+// TRANSPORTER GMAIL
+// ====================
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER, // tu gmail
+    pass: process.env.EMAIL_PASS, // contraseña de aplicación
+  },
+});
 
 // Ruta de prueba
-app.get('/', (req, res) => {
-  res.send('¡La API está funcionando!');
+app.get("/", (req, res) => {
+  res.send("¡La API está funcionando!");
 });
 
 // ====================
@@ -113,17 +122,20 @@ app.post("/usuarios/forgot-password", async (req, res) => {
       [token, expires, email]
     );
 
-    // Crear enlace de recuperación
+    // Crear enlace de recuperación (ajústalo según tu frontend)
     const resetUrl = `http://127.0.0.1:5500/src/views/reset-password.html?token=${token}&email=${email}`;
 
-    // Enviar correo con Resend
-    await resend.emails.send({
-      from: process.env.EMAIL_FROM,
+    // Enviar correo con Nodemailer
+    await transporter.sendMail({
+      from: `"Inventario App" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: "Recuperación de Contraseña",
-      html: `<p>Hola,</p>
-             <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
-             <a href="${resetUrl}">${resetUrl}</a>`
+      html: `
+        <p>Hola,</p>
+        <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
+        <a href="${resetUrl}">${resetUrl}</a>
+        <p>Este enlace expira en 1 hora.</p>
+      `,
     });
 
     res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });

@@ -4,7 +4,7 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
 const pool = require("./db"); // conexión a la BD
 
@@ -16,15 +16,9 @@ app.use(express.json());
 app.use(cors());
 
 // ====================
-// TRANSPORTER GMAIL
+// Inicializar Resend
 // ====================
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER, // tu gmail
-    pass: process.env.EMAIL_PASS, // contraseña de aplicación
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Ruta de prueba
 app.get("/", (req, res) => {
@@ -38,12 +32,10 @@ app.post("/usuarios/register", async (req, res) => {
   const { nombre, documento, email, password } = req.body;
   try {
     const hashed = await bcrypt.hash(password, 10);
-
     const result = await pool.query(
       "INSERT INTO usuarios (nombre, documento, email, password) VALUES ($1,$2,$3,$4) RETURNING id, nombre, documento, email",
       [nombre, documento, email, hashed]
     );
-
     res.json(result.rows[0]);
   } catch (err) {
     console.error("Error registrando usuario:", err);
@@ -62,31 +54,16 @@ app.post("/usuarios/login", async (req, res) => {
   const { email, password } = req.body;
   try {
     const result = await pool.query("SELECT * FROM usuarios WHERE email=$1", [email]);
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: "Usuario no encontrado" });
-    }
+    if (result.rows.length === 0) return res.status(400).json({ error: "Usuario no encontrado" });
 
     const usuario = result.rows[0];
     const valid = await bcrypt.compare(password, usuario.password);
+    if (!valid) return res.status(400).json({ error: "Contraseña incorrecta" });
 
-    if (!valid) {
-      return res.status(400).json({ error: "Contraseña incorrecta" });
-    }
-
-    const token = jwt.sign(
-      { id: usuario.id },
-      process.env.JWT_SECRET || "mi_secreto",
-      { expiresIn: "1h" }
-    );
-
+    const token = jwt.sign({ id: usuario.id }, process.env.JWT_SECRET || "mi_secreto", { expiresIn: "1h" });
     res.json({
       message: "Login exitoso",
-      usuario: {
-        id: usuario.id,
-        nombre: usuario.nombre,
-        documento: usuario.documento,
-        email: usuario.email,
-      },
+      usuario: { id: usuario.id, nombre: usuario.nombre, documento: usuario.documento, email: usuario.email },
       token,
     });
   } catch (err) {
@@ -96,46 +73,31 @@ app.post("/usuarios/login", async (req, res) => {
 });
 
 // ====================
-// OLVIDÉ CONTRASEÑA
+// OLVIDÉ CONTRASEÑA (Resend API)
 // ====================
 app.post("/usuarios/forgot-password", async (req, res) => {
   const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ error: "Correo electrónico es necesario." });
-  }
+  if (!email) return res.status(400).json({ error: "Correo electrónico es necesario." });
 
   try {
     const result = await pool.query("SELECT id, email FROM usuarios WHERE email=$1", [email]);
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: "Correo no registrado." });
-    }
+    if (result.rows.length === 0) return res.status(400).json({ error: "Correo no registrado." });
 
-    const usuario = result.rows[0];
-
-    // Generar token y fecha de expiración
     const token = crypto.randomBytes(32).toString("hex");
     const expires = new Date(Date.now() + 3600000); // 1 hora
 
-    await pool.query(
-      "UPDATE usuarios SET reset_token=$1, reset_token_expires=$2 WHERE email=$3",
-      [token, expires, email]
-    );
+    await pool.query("UPDATE usuarios SET reset_token=$1, reset_token_expires=$2 WHERE email=$3", [token, expires, email]);
 
-    // Crear enlace de recuperación (ajústalo según tu frontend)
     const resetUrl = `http://127.0.0.1:5500/src/views/reset-password.html?token=${token}&email=${email}`;
 
-    // Enviar correo con Nodemailer
-    await transporter.sendMail({
-      from: `"Inventario App" <${process.env.EMAIL_USER}>`,
+    await resend.emails.send({
+      from: process.env.EMAIL_FROM,
       to: email,
       subject: "Recuperación de Contraseña",
-      html: `
-        <p>Hola,</p>
-        <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
-        <a href="${resetUrl}">${resetUrl}</a>
-        <p>Este enlace expira en 1 hora.</p>
-      `,
+      html: `<p>Hola,</p>
+             <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
+             <a href="${resetUrl}">${resetUrl}</a>
+             <p>Este enlace expira en 1 hora.</p>`,
     });
 
     res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
@@ -150,33 +112,17 @@ app.post("/usuarios/forgot-password", async (req, res) => {
 // ====================
 app.post("/usuarios/reset-password", async (req, res) => {
   const { token, email, newPassword } = req.body;
-
-  if (!token || !email || !newPassword) {
-    return res.status(400).json({ error: "Faltan parámetros." });
-  }
+  if (!token || !email || !newPassword) return res.status(400).json({ error: "Faltan parámetros." });
 
   try {
-    const result = await pool.query(
-      "SELECT * FROM usuarios WHERE email=$1 AND reset_token=$2",
-      [email, token]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: "Token o correo incorrectos." });
-    }
+    const result = await pool.query("SELECT * FROM usuarios WHERE email=$1 AND reset_token=$2", [email, token]);
+    if (result.rows.length === 0) return res.status(400).json({ error: "Token o correo incorrectos." });
 
     const usuario = result.rows[0];
-
-    if (usuario.reset_token_expires < new Date()) {
-      return res.status(400).json({ error: "El enlace de recuperación ha expirado." });
-    }
+    if (usuario.reset_token_expires < new Date()) return res.status(400).json({ error: "El enlace de recuperación ha expirado." });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    await pool.query(
-      "UPDATE usuarios SET password=$1, reset_token=NULL, reset_token_expires=NULL WHERE email=$2",
-      [hashedPassword, email]
-    );
+    await pool.query("UPDATE usuarios SET password=$1, reset_token=NULL, reset_token_expires=NULL WHERE email=$2", [hashedPassword, email]);
 
     res.json({ message: "Contraseña actualizada correctamente." });
   } catch (error) {

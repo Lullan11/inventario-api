@@ -3,16 +3,13 @@ const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const crypto = require("crypto");
-
-const pool = require("./db"); // conexión a la BD
+const pool = require("./db");
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
 // ====================
 // Ruta de prueba
@@ -22,9 +19,24 @@ app.get("/", (req, res) => {
 });
 
 // ====================
-// REGISTRO DE USUARIO
+// OBTENER TODOS LOS USUARIOS
 // ====================
-app.post("/usuarios/register", async (req, res) => {
+app.get("/usuarios", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, nombre, documento, email, security_question FROM usuarios ORDER BY id ASC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al obtener usuarios" });
+  }
+});
+
+// ====================
+// REGISTRAR USUARIO
+// ====================
+app.post("/usuarios", async (req, res) => {
   const { nombre, documento, email, password, security_question, security_answer } = req.body;
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -32,20 +44,68 @@ app.post("/usuarios/register", async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO usuarios 
-      (nombre, documento, email, password, security_question, security_answer) 
-      VALUES ($1,$2,$3,$4,$5,$6) 
-      RETURNING id, nombre, documento, email`,
+       (nombre, documento, email, password, security_question, security_answer) 
+       VALUES ($1,$2,$3,$4,$5,$6) 
+       RETURNING id, nombre, documento, email, security_question`,
       [nombre, documento, email, hashedPassword, security_question, hashedAnswer]
     );
 
     res.json(result.rows[0]);
   } catch (err) {
-    console.error("Error registrando usuario:", err);
+    console.error(err);
     if (err.code === "23505") {
       res.status(400).json({ error: "El correo o documento ya están registrados" });
     } else {
       res.status(500).json({ error: "Error al registrar usuario" });
     }
+  }
+});
+
+// ====================
+// EDITAR USUARIO
+// ====================
+app.put("/usuarios/:id", async (req, res) => {
+  const { id } = req.params;
+  const { nombre, documento, email, password, security_question, security_answer } = req.body;
+
+  try {
+    let query = "UPDATE usuarios SET nombre=$1, documento=$2, email=$3, security_question=$4";
+    const params = [nombre, documento, email, security_question];
+
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      query += ", password=$5";
+      params.push(hashedPassword);
+    }
+
+    if (security_answer) {
+      const hashedAnswer = await bcrypt.hash(security_answer, 10);
+      query += password ? ", security_answer=$6" : ", security_answer=$5";
+      params.push(hashedAnswer);
+    }
+
+    query += " WHERE id=$" + (params.length + 1) + " RETURNING id, nombre, documento, email, security_question";
+    params.push(id);
+
+    const result = await pool.query(query, params);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al actualizar usuario" });
+  }
+});
+
+// ====================
+// ELIMINAR USUARIO
+// ====================
+app.delete("/usuarios/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query("DELETE FROM usuarios WHERE id=$1", [id]);
+    res.json({ message: "Usuario eliminado" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al eliminar usuario" });
   }
 });
 

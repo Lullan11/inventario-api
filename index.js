@@ -3,7 +3,7 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
+const { Resend } = require("resend");
 
 const pool = require('./db'); // conexión a la BD
 
@@ -13,6 +13,9 @@ const port = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 app.use(cors());
+
+// Inicializar Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Ruta de prueba
 app.get('/', (req, res) => {
@@ -113,28 +116,15 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     // Crear enlace de recuperación
     const resetUrl = `http://127.0.0.1:5500/src/views/reset-password.html?token=${token}&email=${email}`;
 
-    // Transportador SMTP Brevo (directo)
-    const transporter = nodemailer.createTransport({
-      host: "smtp-relay.brevo.com",
-      port: 587,
-      secure: false,
-      auth: {
-        user: "9801be001@smtp-brevo.com",
-        pass: "ZyT9BRx8NJVYbq2s",
-      },
-    });
-
-    const mailOptions = {
-      from: '"Progresando IPS" <devprogresandoips@gmail.com>', // remitente autorizado en Brevo
+    // Enviar correo con Resend
+    await resend.emails.send({
+      from: process.env.EMAIL_FROM,
       to: email,
       subject: "Recuperación de Contraseña",
-      text: `Hola, para restablecer tu contraseña, haz clic en este enlace: ${resetUrl}`,
-      html: `<p>Hola, para restablecer tu contraseña haz clic aquí:</p>
-             <a href="${resetUrl}">${resetUrl}</a>`,
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log("Correo enviado:", info.messageId);
+      html: `<p>Hola,</p>
+             <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
+             <a href="${resetUrl}">${resetUrl}</a>`
+    });
 
     res.json({ message: "Si el correo está registrado, recibirás un enlace de recuperación." });
   } catch (error) {
@@ -142,7 +132,6 @@ app.post("/usuarios/forgot-password", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
-
 
 // ====================
 // RESET DE CONTRASEÑA
@@ -183,7 +172,6 @@ app.post("/usuarios/reset-password", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
-
 
 
 

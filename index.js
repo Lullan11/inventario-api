@@ -884,6 +884,29 @@ app.get("/tipos-equipo", async (req, res) => {
   }
 });
 
+// DELETE /tipos-equipo/:id
+app.delete("/tipos-equipo/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 1️⃣ Borrar los campos personalizados asociados
+    await pool.query("DELETE FROM campos_personalizados WHERE id_tipo_equipo = $1", [id]);
+
+    // 2️⃣ Borrar el tipo de equipo
+    const result = await pool.query("DELETE FROM tipos_equipo WHERE id = $1 RETURNING *", [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ msg: "Tipo de equipo no encontrado" });
+    }
+
+    res.json({ msg: "Tipo de equipo eliminado correctamente" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Error al eliminar tipo de equipo" });
+  }
+});
+
+
 
 
 

@@ -585,6 +585,7 @@ app.get('/areas/:id/puestos', async (req, res) => {
 // Obtener equipos, opcionalmente filtrando por puesto
 // Obtener todos los equipos con área, sede y puesto
 // Obtener equipos con mantenimiento
+// Obtener equipos con sus mantenimientos configurados
 app.get('/equipos', async (req, res) => {
   const { puesto_id } = req.query;
   try {
@@ -594,54 +595,71 @@ app.get('/equipos', async (req, res) => {
         e.responsable_nombre, e.responsable_documento,
         e.id_area, a.nombre AS area_nombre,
         e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
-        e.id_tipo_equipo, e.intervalo_dias, e.fecha_inicio_mantenimiento, e.proximo_mantenimiento,
+        e.id_tipo_equipo,
         s.id AS id_sede, s.nombre AS sede_nombre,
-        te.nombre AS tipo_equipo_nombre
+        te.nombre AS tipo_equipo_nombre,
+        e.estado
       FROM equipos e
       LEFT JOIN areas a ON e.id_area = a.id
       LEFT JOIN sedes s ON a.id_sede = s.id
       LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
       LEFT JOIN tipos_equipo te ON e.id_tipo_equipo = te.id
+      WHERE e.estado = 'activo'
     `;
 
     const params = [];
     if (puesto_id) {
-      query += ` WHERE e.id_puesto = $1`;
+      query += ` AND e.id_puesto = $1`;
       params.push(puesto_id);
     }
 
     query += ` ORDER BY e.id ASC`;
     const result = await pool.query(query, params);
 
-    const hoy = new Date();
+    // Para cada equipo, obtener sus mantenimientos configurados
+    const equiposConMantenimientos = await Promise.all(
+      result.rows.map(async (equipo) => {
+        // Obtener configuraciones de mantenimiento del equipo
+        const mantConfigRes = await pool.query(
+          `SELECT em.*, tm.nombre as tipo_mantenimiento_nombre
+           FROM equipos_mantenimientos em
+           LEFT JOIN tipos_mantenimiento tm ON em.id_tipo_mantenimiento = tm.id
+           WHERE em.id_equipo = $1 AND em.activo = true`,
+          [equipo.id]
+        );
 
-    // Calcular estado de mantenimiento
-    const equiposConEstado = result.rows.map(eq => {
-      let estado = "SIN_DATOS";
-      
-      if (eq.proximo_mantenimiento) {
-        const proxima = new Date(eq.proximo_mantenimiento);
-        const diffDias = Math.ceil((proxima - hoy) / (1000 * 60 * 60 * 24));
-        
-        if (diffDias > 10) estado = "OK";
-        else if (diffDias > 0) estado = "PRÓXIMO";
-        else estado = "VENCIDO";
-      }
+        equipo.mantenimientos_configurados = mantConfigRes.rows;
 
-      return {
-        ...eq,
-        estado_mantenimiento: estado
-      };
-    });
+        // Calcular estado general (tomando el más urgente)
+        let estadoGeneral = "OK";
+        const hoy = new Date();
 
-    res.json(equiposConEstado);
+        mantConfigRes.rows.forEach(mant => {
+          if (mant.proxima_fecha) {
+            const proxima = new Date(mant.proxima_fecha);
+            const diffDias = Math.ceil((proxima - hoy) / (1000 * 60 * 60 * 24));
+            
+            if (diffDias <= 0 && estadoGeneral !== "VENCIDO") {
+              estadoGeneral = "VENCIDO";
+            } else if (diffDias <= 10 && estadoGeneral === "OK") {
+              estadoGeneral = "PRÓXIMO";
+            }
+          }
+        });
+
+        equipo.estado_mantenimiento = estadoGeneral;
+        return equipo;
+      })
+    );
+
+    res.json(equiposConMantenimientos);
   } catch (error) {
     console.error('Error al obtener equipos:', error);
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
 
-// Crear equipo con mantenimiento opcional
+// Crear equipo (sin datos de mantenimiento)
 app.post('/equipos', async (req, res) => {
   const {
     nombre,
@@ -653,8 +671,7 @@ app.post('/equipos', async (req, res) => {
     responsable_documento,
     id_tipo_equipo,
     campos_personalizados,
-    intervalo_dias,
-    fecha_inicio_mantenimiento
+    mantenimientos // 🆕 Array de mantenimientos configurados
   } = req.body;
 
   try {
@@ -690,28 +707,16 @@ app.post('/equipos', async (req, res) => {
 
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
-    // Calcular próxima fecha de mantenimiento (si se proporcionan datos)
-    let proximo_mantenimiento = null;
-    let intervaloFinal = intervalo_dias || 30; // Valor por defecto
-
-    if (intervalo_dias && fecha_inicio_mantenimiento) {
-      const inicio = new Date(fecha_inicio_mantenimiento);
-      inicio.setDate(inicio.getDate() + parseInt(intervalo_dias));
-      proximo_mantenimiento = inicio.toISOString().split('T')[0];
-    }
-
-    // Insertar equipo
+    // Insertar equipo (sin datos de mantenimiento)
     const result = await pool.query(
       `INSERT INTO equipos
       (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
-       responsable_nombre, responsable_documento, id_tipo_equipo,
-       intervalo_dias, fecha_inicio_mantenimiento, proximo_mantenimiento)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       responsable_nombre, responsable_documento, id_tipo_equipo, estado)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'activo')
       RETURNING *`,
       [
         nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
-        final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
-        intervaloFinal, fecha_inicio_mantenimiento, proximo_mantenimiento
+        final_responsable_nombre, final_responsable_documento, id_tipo_equipo
       ]
     );
 
@@ -731,13 +736,39 @@ app.post('/equipos', async (req, res) => {
       }
     }
 
-    res.status(201).json({ msg: 'Equipo creado correctamente', equipo: result.rows[0] });
+    // 🆕 Guardar configuraciones de mantenimiento
+    if (mantenimientos && mantenimientos.length > 0) {
+      for (const mantenimiento of mantenimientos) {
+        const proximaFecha = new Date(mantenimiento.fecha_inicio);
+        proximaFecha.setDate(proximaFecha.getDate() + mantenimiento.intervalo_dias);
+
+        await pool.query(
+          `INSERT INTO equipos_mantenimientos 
+          (id_equipo, id_tipo_mantenimiento, intervalo_dias, fecha_inicio, proxima_fecha)
+          VALUES ($1, $2, $3, $4, $5)`,
+          [
+            id_equipo,
+            mantenimiento.id_tipo,
+            mantenimiento.intervalo_dias,
+            mantenimiento.fecha_inicio,
+            proximaFecha.toISOString().split('T')[0]
+          ]
+        );
+      }
+    }
+
+    res.status(201).json({ 
+      msg: 'Equipo creado correctamente', 
+      equipo: result.rows[0],
+      mantenimientos_configurados: mantenimientos 
+    });
 
   } catch (err) {
     console.error("Error al crear equipo:", err);
     res.status(500).json({ msg: err.message });
   }
 });
+
 
 
 // Actualizar un equipo
@@ -906,64 +937,102 @@ app.get('/ubicacion/:tipo/:id', async (req, res) => {
 });
 
 
+// ========================= CONFIGURACIÓN DE MANTENIMIENTOS POR EQUIPO =========================
 
-// ========================= MANTENIMIENTOS =========================
-
-// Obtener tipos de mantenimiento
-app.get('/tipos-mantenimiento', async (req, res) => {
+// Obtener mantenimientos configurados para un equipo
+app.get('/equipos/:id/mantenimientos', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM tipos_mantenimiento ORDER BY id');
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT em.*, tm.nombre as tipo_mantenimiento_nombre
+       FROM equipos_mantenimientos em
+       LEFT JOIN tipos_mantenimiento tm ON em.id_tipo_mantenimiento = tm.id
+       WHERE em.id_equipo = $1 AND em.activo = true
+       ORDER BY em.proxima_fecha ASC`,
+      [id]
+    );
     res.json(result.rows);
   } catch (error) {
-    console.error('Error al obtener tipos de mantenimiento:', error);
-    res.status(500).json({ error: 'Error al obtener tipos de mantenimiento' });
+    console.error('Error al obtener mantenimientos del equipo:', error);
+    res.status(500).json({ error: 'Error al obtener mantenimientos del equipo' });
   }
 });
 
-// Registrar mantenimiento
+// Agregar mantenimiento a un equipo
+app.post('/equipos/:id/mantenimientos', async (req, res) => {
+  const { id } = req.params;
+  const { id_tipo_mantenimiento, intervalo_dias, fecha_inicio } = req.body;
+
+  try {
+    // Calcular próxima fecha
+    const proximaFecha = new Date(fecha_inicio);
+    proximaFecha.setDate(proximaFecha.getDate() + intervalo_dias);
+
+    const result = await pool.query(
+      `INSERT INTO equipos_mantenimientos 
+      (id_equipo, id_tipo_mantenimiento, intervalo_dias, fecha_inicio, proxima_fecha)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *`,
+      [id, id_tipo_mantenimiento, intervalo_dias, fecha_inicio, proximaFecha.toISOString().split('T')[0]]
+    );
+
+    res.status(201).json({
+      msg: 'Mantenimiento configurado correctamente',
+      mantenimiento: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al configurar mantenimiento:', error);
+    res.status(500).json({ error: 'Error al configurar mantenimiento' });
+  }
+});
+
+// ========================= EJECUCIÓN DE MANTENIMIENTOS =========================
+
+// Registrar mantenimiento realizado
 app.post('/mantenimientos', async (req, res) => {
   const {
     id_equipo,
-    id_tipo,
-    fecha_programada,
+    id_tipo_mantenimiento,
     fecha_realizado,
     descripcion,
     realizado_por,
-    observaciones,
-    estado
+    observaciones
   } = req.body;
 
   try {
-    // Insertar mantenimiento
+    // 1. Registrar en historial
     const result = await pool.query(
       `INSERT INTO mantenimientos 
       (id_equipo, id_tipo, fecha_programada, fecha_realizado, descripcion, realizado_por, observaciones, estado)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'realizado')
       RETURNING *`,
-      [id_equipo, id_tipo, fecha_programada, fecha_realizado, descripcion, realizado_por, observaciones, estado || 'pendiente']
+      [id_equipo, id_tipo_mantenimiento, fecha_realizado, fecha_realizado, descripcion, realizado_por, observaciones]
     );
 
-    // Si es preventivo o calibración y está realizado, calcular próxima fecha
-    if (estado === 'realizado' && (id_tipo === 1 || id_tipo === 2)) { // Asumiendo 1=preventivo, 2=calibración
-      const equipoRes = await pool.query(
-        'SELECT intervalo_dias FROM equipos WHERE id = $1',
-        [id_equipo]
+    // 2. Actualizar próxima fecha en la configuración
+    const configRes = await pool.query(
+      `SELECT intervalo_dias FROM equipos_mantenimientos 
+       WHERE id_equipo = $1 AND id_tipo_mantenimiento = $2 AND activo = true`,
+      [id_equipo, id_tipo_mantenimiento]
+    );
+
+    if (configRes.rows.length > 0) {
+      const intervalo = configRes.rows[0].intervalo_dias;
+      const proximaFecha = new Date(fecha_realizado);
+      proximaFecha.setDate(proximaFecha.getDate() + intervalo);
+
+      await pool.query(
+        `UPDATE equipos_mantenimientos 
+         SET fecha_inicio = $1, proxima_fecha = $2
+         WHERE id_equipo = $3 AND id_tipo_mantenimiento = $4 AND activo = true`,
+        [fecha_realizado, proximaFecha.toISOString().split('T')[0], id_equipo, id_tipo_mantenimiento]
       );
-      
-      if (equipoRes.rows.length > 0 && equipoRes.rows[0].intervalo_dias) {
-        const proximaFecha = new Date(fecha_realizado || new Date());
-        proximaFecha.setDate(proximaFecha.getDate() + parseInt(equipoRes.rows[0].intervalo_dias));
-        
-        await pool.query(
-          'UPDATE equipos SET proximo_mantenimiento = $1 WHERE id = $2',
-          [proximaFecha.toISOString().split('T')[0], id_equipo]
-        );
-      }
     }
 
     res.status(201).json({
       msg: 'Mantenimiento registrado correctamente',
-      mantenimiento: result.rows[0]
+      mantenimiento: result.rows[0],
+      proxima_fecha_calculada: proximaFecha ? proximaFecha.toISOString().split('T')[0] : null
     });
 
   } catch (error) {
@@ -972,7 +1041,7 @@ app.post('/mantenimientos', async (req, res) => {
   }
 });
 
-// Obtener mantenimientos de un equipo
+// Obtener historial de mantenimientos de un equipo
 app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
   try {
     const { id_equipo } = req.params;
@@ -981,7 +1050,7 @@ app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
        FROM mantenimientos m
        LEFT JOIN tipos_mantenimiento tm ON m.id_tipo = tm.id
        WHERE m.id_equipo = $1 
-       ORDER BY m.fecha_programada DESC`,
+       ORDER BY m.fecha_realizado DESC, m.fecha_programada DESC`,
       [id_equipo]
     );
     res.json(result.rows);
@@ -990,7 +1059,6 @@ app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener mantenimientos' });
   }
 });
-
 
 // ========================= EQUIPOS CON CAMPOS PERSONALIZADOS =========================
 

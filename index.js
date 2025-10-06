@@ -638,7 +638,7 @@ app.get('/equipos', async (req, res) => {
           if (mant.proxima_fecha) {
             const proxima = new Date(mant.proxima_fecha);
             const diffDias = Math.ceil((proxima - hoy) / (1000 * 60 * 60 * 24));
-            
+
             if (diffDias <= 0 && estadoGeneral !== "VENCIDO") {
               estadoGeneral = "VENCIDO";
             } else if (diffDias <= 10 && estadoGeneral === "OK") {
@@ -658,8 +658,9 @@ app.get('/equipos', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
+// ========================= EQUIPOS =========================
 
-// Crear equipo (sin datos de mantenimiento)
+// Crear equipo con mantenimientos
 app.post('/equipos', async (req, res) => {
   const {
     nombre,
@@ -671,7 +672,7 @@ app.post('/equipos', async (req, res) => {
     responsable_documento,
     id_tipo_equipo,
     campos_personalizados,
-    mantenimientos // 🆕 Array de mantenimientos configurados
+    mantenimientos
   } = req.body;
 
   try {
@@ -707,7 +708,7 @@ app.post('/equipos', async (req, res) => {
 
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
-    // Insertar equipo (sin datos de mantenimiento)
+    // Insertar equipo
     const result = await pool.query(
       `INSERT INTO equipos
       (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
@@ -736,7 +737,7 @@ app.post('/equipos', async (req, res) => {
       }
     }
 
-    // 🆕 Guardar configuraciones de mantenimiento
+    // Guardar configuraciones de mantenimiento (permite duplicados del mismo tipo)
     if (mantenimientos && mantenimientos.length > 0) {
       for (const mantenimiento of mantenimientos) {
         const proximaFecha = new Date(mantenimiento.fecha_inicio);
@@ -744,23 +745,24 @@ app.post('/equipos', async (req, res) => {
 
         await pool.query(
           `INSERT INTO equipos_mantenimientos 
-          (id_equipo, id_tipo_mantenimiento, intervalo_dias, fecha_inicio, proxima_fecha)
-          VALUES ($1, $2, $3, $4, $5)`,
+          (id_equipo, id_tipo_mantenimiento, intervalo_dias, fecha_inicio, proxima_fecha, nombre_personalizado)
+          VALUES ($1, $2, $3, $4, $5, $6)`,
           [
             id_equipo,
             mantenimiento.id_tipo,
             mantenimiento.intervalo_dias,
             mantenimiento.fecha_inicio,
-            proximaFecha.toISOString().split('T')[0]
+            proximaFecha.toISOString().split('T')[0],
+            mantenimiento.nombre_personalizado || `${mantenimiento.tipo_nombre} ${mantenimiento.intervalo_dias}d`
           ]
         );
       }
     }
 
-    res.status(201).json({ 
-      msg: 'Equipo creado correctamente', 
+    res.status(201).json({
+      msg: 'Equipo creado correctamente',
       equipo: result.rows[0],
-      mantenimientos_configurados: mantenimientos 
+      mantenimientos_configurados: mantenimientos
     });
 
   } catch (err) {

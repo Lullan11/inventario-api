@@ -584,8 +584,9 @@ app.get('/areas/:id/puestos', async (req, res) => {
 // Obtener todos los equipos con área, sede y puesto
 // Obtener equipos, opcionalmente filtrando por puesto
 // Obtener todos los equipos con área, sede y puesto
+// Obtener equipos con mantenimiento
 app.get('/equipos', async (req, res) => {
-  const { puesto_id } = req.query; // viene de ?puesto_id=123
+  const { puesto_id } = req.query;
   try {
     let query = `
       SELECT 
@@ -593,13 +594,14 @@ app.get('/equipos', async (req, res) => {
         e.responsable_nombre, e.responsable_documento,
         e.id_area, a.nombre AS area_nombre,
         e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
-        e.id_tipo_equipo,
-        e.intervalo_dias, e.fecha_inicio_mantenimiento, e.proximo_mantenimiento,
-        s.id AS id_sede, s.nombre AS sede_nombre
+        e.id_tipo_equipo, e.intervalo_dias, e.fecha_inicio_mantenimiento, e.proximo_mantenimiento,
+        s.id AS id_sede, s.nombre AS sede_nombre,
+        te.nombre AS tipo_equipo_nombre
       FROM equipos e
       LEFT JOIN areas a ON e.id_area = a.id
       LEFT JOIN sedes s ON a.id_sede = s.id
       LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      LEFT JOIN tipos_equipo te ON e.id_tipo_equipo = te.id
     `;
 
     const params = [];
@@ -609,73 +611,37 @@ app.get('/equipos', async (req, res) => {
     }
 
     query += ` ORDER BY e.id ASC`;
-
     const result = await pool.query(query, params);
 
-    // 🟢 Calcular estado de mantenimiento
     const hoy = new Date();
+
+    // Calcular estado de mantenimiento
     const equiposConEstado = result.rows.map(eq => {
       let estado = "SIN_DATOS";
-
+      
       if (eq.proximo_mantenimiento) {
         const proxima = new Date(eq.proximo_mantenimiento);
         const diffDias = Math.ceil((proxima - hoy) / (1000 * 60 * 60 * 24));
-
-        if (diffDias > 10) {
-          estado = "OK";
-        } else if (diffDias > 0 && diffDias <= 10) {
-          estado = "PRÓXIMO";
-        } else {
-          estado = "VENCIDO";
-        }
+        
+        if (diffDias > 10) estado = "OK";
+        else if (diffDias > 0) estado = "PRÓXIMO";
+        else estado = "VENCIDO";
       }
 
-      return { ...eq, estado_mantenimiento: estado };
+      return {
+        ...eq,
+        estado_mantenimiento: estado
+      };
     });
 
     res.json(equiposConEstado);
-
   } catch (error) {
     console.error('Error al obtener equipos:', error);
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
 
-
-
-// Obtener un equipo por ID
-app.get('/equipos/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query(`
-      SELECT 
-        e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
-        e.responsable_nombre, e.responsable_documento,
-        e.id_area, a.nombre AS area_nombre,
-        e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
-        e.id_tipo_equipo,
-        s.id AS id_sede, s.nombre AS sede_nombre
-      FROM equipos e
-      LEFT JOIN areas a ON e.id_area = a.id
-      LEFT JOIN sedes s ON a.id_sede = s.id
-      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
-      WHERE e.id = $1
-    `, [id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Equipo no encontrado' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al obtener equipo por id:', error);
-    res.status(500).json({ error: 'Error al obtener el equipo' });
-  }
-});
-
-// crear equipo
-// Crear un equipo
-// Crear un equipo
+// Crear equipo con mantenimiento opcional
 app.post('/equipos', async (req, res) => {
   const {
     nombre,
@@ -687,8 +653,8 @@ app.post('/equipos', async (req, res) => {
     responsable_documento,
     id_tipo_equipo,
     campos_personalizados,
-    intervalo_dias,                // 🟢 ahora sí lo leemos del body
-    fecha_inicio_mantenimiento     // 🟢 ahora sí lo leemos del body
+    intervalo_dias,
+    fecha_inicio_mantenimiento
   } = req.body;
 
   try {
@@ -697,7 +663,7 @@ app.post('/equipos', async (req, res) => {
     let final_responsable_nombre = responsable_nombre;
     let final_responsable_documento = responsable_documento;
 
-    // Obtener IDs de área o puesto según la ubicación
+    // Obtener IDs de área o puesto
     if (ubicacion_tipo === 'puesto') {
       const puesto = await pool.query(
         'SELECT id_area, responsable_nombre, responsable_documento FROM puestos_trabajo WHERE id=$1',
@@ -722,18 +688,19 @@ app.post('/equipos', async (req, res) => {
       return res.status(400).json({ msg: 'Tipo de ubicación inválido' });
     }
 
-    // Definir ubicación
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
-    // 🟢 Calcular próxima fecha de mantenimiento
+    // Calcular próxima fecha de mantenimiento (si se proporcionan datos)
     let proximo_mantenimiento = null;
+    let intervaloFinal = intervalo_dias || 30; // Valor por defecto
+
     if (intervalo_dias && fecha_inicio_mantenimiento) {
       const inicio = new Date(fecha_inicio_mantenimiento);
       inicio.setDate(inicio.getDate() + parseInt(intervalo_dias));
       proximo_mantenimiento = inicio.toISOString().split('T')[0];
     }
 
-    // 🟢 Insertar equipo con campos de mantenimiento incluidos
+    // Insertar equipo
     const result = await pool.query(
       `INSERT INTO equipos
       (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
@@ -744,7 +711,7 @@ app.post('/equipos', async (req, res) => {
       [
         nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
         final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
-        intervalo_dias, fecha_inicio_mantenimiento, proximo_mantenimiento
+        intervaloFinal, fecha_inicio_mantenimiento, proximo_mantenimiento
       ]
     );
 
@@ -768,10 +735,9 @@ app.post('/equipos', async (req, res) => {
 
   } catch (err) {
     console.error("Error al crear equipo:", err);
-    res.status(500).json({ msg: err.message, stack: err.stack });
+    res.status(500).json({ msg: err.message });
   }
 });
-
 
 
 // Actualizar un equipo
@@ -941,114 +907,89 @@ app.get('/ubicacion/:tipo/:id', async (req, res) => {
 
 
 
+// ========================= MANTENIMIENTOS =========================
 
-
-// ========================= MANTENIMIENTOS PREVENTIVOS =========================
-
-// Registrar un mantenimiento preventivo (cuando validas)
-app.post('/mantenimientos/preventivos', async (req, res) => {
-  const { id_equipo, realizado_por } = req.body;
-
+// Obtener tipos de mantenimiento
+app.get('/tipos-mantenimiento', async (req, res) => {
   try {
-    const hoy = new Date().toISOString().split("T")[0];
-
-    // Guardar mantenimiento
-    const insert = await pool.query(
-      `INSERT INTO mantenimientos_preventivos (id_equipo, fecha, realizado_por)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [id_equipo, hoy, realizado_por]
-    );
-
-    // Buscar datos del equipo para recalcular próximo mantenimiento
-    const eqRes = await pool.query(
-      `SELECT intervalo_dias FROM equipos WHERE id=$1`,
-      [id_equipo]
-    );
-
-    if (eqRes.rows.length === 0) {
-      return res.status(404).json({ msg: "Equipo no encontrado" });
-    }
-
-    const intervalo = eqRes.rows[0].intervalo_dias;
-    let proximo_mantenimiento = null;
-    if (intervalo) {
-      const proxima = new Date(hoy);
-      proxima.setDate(proxima.getDate() + intervalo);
-      proximo_mantenimiento = proxima.toISOString().split("T")[0];
-    }
-
-    // Actualizar equipo con nueva fecha de próximo mantenimiento
-    await pool.query(
-      `UPDATE equipos SET proximo_mantenimiento=$1 WHERE id=$2`,
-      [proximo_mantenimiento, id_equipo]
-    );
-
-    res.json({
-      msg: "Mantenimiento preventivo registrado",
-      mantenimiento: insert.rows[0],
-      proximo_mantenimiento
-    });
-
-  } catch (err) {
-    console.error("Error al registrar mantenimiento preventivo:", err);
-    res.status(500).json({ msg: "Error al registrar mantenimiento preventivo" });
+    const result = await pool.query('SELECT * FROM tipos_mantenimiento ORDER BY id');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener tipos de mantenimiento:', error);
+    res.status(500).json({ error: 'Error al obtener tipos de mantenimiento' });
   }
 });
 
-// Historial de mantenimientos preventivos de un equipo
-app.get('/mantenimientos/preventivos/:id_equipo', async (req, res) => {
+// Registrar mantenimiento
+app.post('/mantenimientos', async (req, res) => {
+  const {
+    id_equipo,
+    id_tipo,
+    fecha_programada,
+    fecha_realizado,
+    descripcion,
+    realizado_por,
+    observaciones,
+    estado
+  } = req.body;
+
+  try {
+    // Insertar mantenimiento
+    const result = await pool.query(
+      `INSERT INTO mantenimientos 
+      (id_equipo, id_tipo, fecha_programada, fecha_realizado, descripcion, realizado_por, observaciones, estado)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *`,
+      [id_equipo, id_tipo, fecha_programada, fecha_realizado, descripcion, realizado_por, observaciones, estado || 'pendiente']
+    );
+
+    // Si es preventivo o calibración y está realizado, calcular próxima fecha
+    if (estado === 'realizado' && (id_tipo === 1 || id_tipo === 2)) { // Asumiendo 1=preventivo, 2=calibración
+      const equipoRes = await pool.query(
+        'SELECT intervalo_dias FROM equipos WHERE id = $1',
+        [id_equipo]
+      );
+      
+      if (equipoRes.rows.length > 0 && equipoRes.rows[0].intervalo_dias) {
+        const proximaFecha = new Date(fecha_realizado || new Date());
+        proximaFecha.setDate(proximaFecha.getDate() + parseInt(equipoRes.rows[0].intervalo_dias));
+        
+        await pool.query(
+          'UPDATE equipos SET proximo_mantenimiento = $1 WHERE id = $2',
+          [proximaFecha.toISOString().split('T')[0], id_equipo]
+        );
+      }
+    }
+
+    res.status(201).json({
+      msg: 'Mantenimiento registrado correctamente',
+      mantenimiento: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Error al registrar mantenimiento:', error);
+    res.status(500).json({ error: 'Error al registrar mantenimiento' });
+  }
+});
+
+// Obtener mantenimientos de un equipo
+app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
   try {
     const { id_equipo } = req.params;
     const result = await pool.query(
-      `SELECT * FROM mantenimientos_preventivos WHERE id_equipo=$1 ORDER BY fecha DESC`,
+      `SELECT m.*, tm.nombre as tipo_mantenimiento 
+       FROM mantenimientos m
+       LEFT JOIN tipos_mantenimiento tm ON m.id_tipo = tm.id
+       WHERE m.id_equipo = $1 
+       ORDER BY m.fecha_programada DESC`,
       [id_equipo]
     );
     res.json(result.rows);
-  } catch (err) {
-    console.error("Error al obtener mantenimientos preventivos:", err);
-    res.status(500).json({ msg: "Error al obtener mantenimientos preventivos" });
+  } catch (error) {
+    console.error('Error al obtener mantenimientos:', error);
+    res.status(500).json({ error: 'Error al obtener mantenimientos' });
   }
 });
-
-
-// ========================= MANTENIMIENTOS CORRECTIVOS =========================
-
-// Registrar un correctivo
-app.post('/mantenimientos/correctivos', async (req, res) => {
-  const { id_equipo, descripcion, realizado_por, observaciones } = req.body;
-
-  try {
-    const insert = await pool.query(
-      `INSERT INTO mantenimientos_correctivos (id_equipo, fecha, descripcion, realizado_por, observaciones)
-       VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
-      [id_equipo, descripcion, realizado_por, observaciones]
-    );
-
-    res.json({
-      msg: "Mantenimiento correctivo registrado",
-      mantenimiento: insert.rows[0]
-    });
-  } catch (err) {
-    console.error("Error al registrar mantenimiento correctivo:", err);
-    res.status(500).json({ msg: "Error al registrar mantenimiento correctivo" });
-  }
-});
-
-// Historial correctivos de un equipo
-app.get('/mantenimientos/correctivos/:id_equipo', async (req, res) => {
-  try {
-    const { id_equipo } = req.params;
-    const result = await pool.query(
-      `SELECT * FROM mantenimientos_correctivos WHERE id_equipo=$1 ORDER BY fecha DESC`,
-      [id_equipo]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error al obtener mantenimientos correctivos:", err);
-    res.status(500).json({ msg: "Error al obtener mantenimientos correctivos" });
-  }
-});
-
 
 
 // ========================= EQUIPOS CON CAMPOS PERSONALIZADOS =========================

@@ -940,6 +940,136 @@ app.get('/equipos/:id/completo', async (req, res) => {
 
 
 
+// ========================= INACTIVACIÓN DE EQUIPOS =========================
+
+// Inactivar equipo (cambiar estado a 'inactivo')
+app.put('/equipos/:id/inactivar', async (req, res) => {
+  const { id } = req.params;
+  const { motivo, observaciones, fecha_baja, realizado_por } = req.body;
+
+  try {
+    // Verificar que el equipo existe
+    const equipoRes = await pool.query('SELECT * FROM equipos WHERE id = $1', [id]);
+    if (equipoRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipo no encontrado' });
+    }
+
+    // Actualizar estado del equipo
+    const result = await pool.query(
+      'UPDATE equipos SET estado = $1 WHERE id = $2 RETURNING *',
+      ['inactivo', id]
+    );
+
+    // Registrar historial de baja
+    await pool.query(
+      `INSERT INTO historial_bajas_equipos 
+      (id_equipo, motivo, observaciones, fecha_baja, realizado_por)
+      VALUES ($1, $2, $3, $4, $5)`,
+      [id, motivo, observaciones, fecha_baja || new Date(), realizado_por]
+    );
+
+    res.json({
+      message: 'Equipo inactivado correctamente',
+      equipo: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Error al inactivar equipo:', error);
+    res.status(500).json({ error: 'Error al inactivar el equipo' });
+  }
+});
+
+// Obtener equipos inactivos
+app.get('/equipos/inactivos', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
+        e.responsable_nombre, e.responsable_documento,
+        e.id_area, a.nombre AS area_nombre,
+        e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
+        e.id_tipo_equipo, te.nombre AS tipo_equipo_nombre,
+        s.id AS id_sede, s.nombre AS sede_nombre,
+        e.estado,
+        hb.motivo, hb.observaciones, hb.fecha_baja, hb.realizado_por
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN sedes s ON a.id_sede = s.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      LEFT JOIN tipos_equipo te ON e.id_tipo_equipo = te.id
+      LEFT JOIN historial_bajas_equipos hb ON e.id = hb.id_equipo
+      WHERE e.estado = 'inactivo'
+      ORDER BY hb.fecha_baja DESC
+    `);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener equipos inactivos:', error);
+    res.status(500).json({ error: 'Error al obtener equipos inactivos' });
+  }
+});
+
+// Obtener datos completos de equipo inactivo para PDF
+app.get('/equipos/:id/inactivo-completo', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT 
+        e.*,
+        a.nombre AS area_nombre,
+        p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
+        s.nombre AS sede_nombre,
+        te.nombre AS tipo_equipo_nombre,
+        hb.motivo, hb.observaciones, hb.fecha_baja, hb.realizado_por
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      LEFT JOIN sedes s ON a.id_sede = s.id
+      LEFT JOIN tipos_equipo te ON e.id_tipo_equipo = te.id
+      LEFT JOIN historial_bajas_equipos hb ON e.id = hb.id_equipo
+      WHERE e.id = $1 AND e.estado = 'inactivo'
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipo inactivo no encontrado' });
+    }
+
+    const equipo = result.rows[0];
+
+    // Obtener valores personalizados
+    const camposRes = await pool.query(`
+      SELECT c.nombre_campo, v.valor
+      FROM valores_personalizados v
+      JOIN campos_personalizados c ON v.id_campo = c.id
+      WHERE v.id_equipo = $1
+    `, [id]);
+
+    equipo.campos_personalizados = {};
+    camposRes.rows.forEach(c => {
+      equipo.campos_personalizados[c.nombre_campo] = c.valor;
+    });
+
+    // Obtener historial de mantenimientos
+    const mantenimientosRes = await pool.query(`
+      SELECT m.*, tm.nombre as tipo_mantenimiento
+      FROM mantenimientos m
+      LEFT JOIN tipos_mantenimiento tm ON m.id_tipo = tm.id
+      WHERE m.id_equipo = $1
+      ORDER BY m.fecha_realizado DESC
+    `, [id]);
+
+    equipo.historial_mantenimientos = mantenimientosRes.rows;
+
+    res.json(equipo);
+
+  } catch (error) {
+    console.error('Error al obtener equipo inactivo completo:', error);
+    res.status(500).json({ error: 'Error al obtener equipo inactivo' });
+  }
+});
+
+
+
 
 
 

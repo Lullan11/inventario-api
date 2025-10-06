@@ -1060,6 +1060,46 @@ app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+// ========================= TIPOS DE MANTENIMIENTO =========================
+
+// Obtener tipos de mantenimiento
+app.get('/tipos-mantenimiento', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM tipos_mantenimiento ORDER BY id');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener tipos de mantenimiento:', error);
+    res.status(500).json({ error: 'Error al obtener tipos de mantenimiento' });
+  }
+});
+
+// Crear tipo de mantenimiento (por si necesitas agregar más)
+app.post('/tipos-mantenimiento', async (req, res) => {
+  const { nombre } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO tipos_mantenimiento (nombre) VALUES ($1) RETURNING *',
+      [nombre]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al crear tipo de mantenimiento:', error);
+    res.status(500).json({ error: 'Error al crear tipo de mantenimiento' });
+  }
+});
+
+
+
+
+
+
+
 // ========================= EQUIPOS CON CAMPOS PERSONALIZADOS =========================
 
 // Obtener un equipo por ID (con campos personalizados + mantenimiento)

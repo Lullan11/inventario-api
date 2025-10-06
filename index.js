@@ -827,117 +827,6 @@ app.delete('/equipos/:id', async (req, res) => {
 });
 
 
-// ========================= TIPO DE EQUIPO Y CAMPOS PERSONALIZADOS =========================
-// POST /tipos-equipo
-app.post("/tipos-equipo", async (req, res) => {
-  const { nombre, campos } = req.body;
-
-  if (!nombre || !campos || campos.length === 0) {
-    return res.status(400).json({ msg: "Datos incompletos" });
-  }
-
-  try {
-    // 1️⃣ Guardar el tipo de equipo y obtener su ID
-    const tipoRes = await pool.query(
-      "INSERT INTO tipos_equipo(nombre) VALUES($1) RETURNING id",
-      [nombre]
-    );
-    const id_tipo_equipo = tipoRes.rows[0].id;
-
-    // 2️⃣ Guardar campos personalizados
-    const insertCampos = campos.map(campo =>
-      pool.query(
-        "INSERT INTO campos_personalizados(nombre_campo, tipo_dato, id_tipo_equipo) VALUES($1, $2, $3)",
-        [campo.nombre, campo.tipo_dato || "texto", id_tipo_equipo]
-      )
-    );
-
-    await Promise.all(insertCampos);
-
-    res.json({ msg: "Tipo de equipo y campos guardados correctamente", id_tipo_equipo });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Error al guardar tipo de equipo" });
-  }
-});
-
-
-// GET /tipos-equipo
-app.get("/tipos-equipo", async (req, res) => {
-  try {
-    const tiposRes = await pool.query("SELECT * FROM tipos_equipo ORDER BY id");
-    const tipos = tiposRes.rows;
-
-    for (let tipo of tipos) {
-      const camposRes = await pool.query(
-        "SELECT * FROM campos_personalizados WHERE id_tipo_equipo = $1 ORDER BY id",
-        [tipo.id]
-      );
-      tipo.campos = camposRes.rows;
-    }
-
-    res.json(tipos);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Error al obtener tipos de equipo" });
-  }
-});
-
-// DELETE /tipos-equipo/:id
-app.delete("/tipos-equipo/:id", async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    // 1️⃣ Borrar los campos personalizados asociados
-    await pool.query("DELETE FROM campos_personalizados WHERE id_tipo_equipo = $1", [id]);
-
-    // 2️⃣ Borrar el tipo de equipo
-    const result = await pool.query("DELETE FROM tipos_equipo WHERE id = $1 RETURNING *", [id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ msg: "Tipo de equipo no encontrado" });
-    }
-
-    res.json({ msg: "Tipo de equipo eliminado correctamente" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Error al eliminar tipo de equipo" });
-  }
-});
-
-
-
-
-
-
-
-// Obtener información de ubicación (puesto o área) para autocompletar responsable y código
-app.get('/ubicacion/:tipo/:id', async (req, res) => {
-  const { tipo, id } = req.params;
-  try {
-    if (tipo === 'puesto') {
-      const result = await pool.query(
-        `SELECT codigo, responsable_nombre FROM puestos_trabajo WHERE id = $1`,
-        [id]
-      );
-      if (result.rows.length === 0) return res.status(404).json({ msg: 'Puesto no encontrado' });
-      return res.json(result.rows[0]);
-    } else if (tipo === 'area') {
-      const result = await pool.query(
-        `SELECT codigo, nombre AS responsable_nombre FROM areas WHERE id = $1`,
-        [id]
-      );
-      if (result.rows.length === 0) return res.status(404).json({ msg: 'Área no encontrada' });
-      return res.json(result.rows[0]);
-    } else {
-      return res.status(400).json({ msg: 'Tipo de ubicación inválido' });
-    }
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ msg: 'Error al obtener ubicación' });
-  }
-});
-
 
 // ========================= CONFIGURACIÓN DE MANTENIMIENTOS POR EQUIPO =========================
 
@@ -1070,8 +959,22 @@ app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
 
 // ========================= TIPOS DE MANTENIMIENTO =========================
 
-// Obtener tipos de mantenimiento
+// Obtener tipos de mantenimiento (EXCLUYENDO Correctivo)
 app.get('/tipos-mantenimiento', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM tipos_mantenimiento WHERE LOWER(nombre) != $1 ORDER BY id',
+      ['correctivo']
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener tipos de mantenimiento:', error);
+    res.status(500).json({ error: 'Error al obtener tipos de mantenimiento' });
+  }
+});
+
+// Obtener TODOS los tipos de mantenimiento (incluyendo Correctivo para otros usos)
+app.get('/tipos-mantenimiento/todos', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM tipos_mantenimiento ORDER BY id');
     res.json(result.rows);
@@ -1081,23 +984,119 @@ app.get('/tipos-mantenimiento', async (req, res) => {
   }
 });
 
-// Crear tipo de mantenimiento (por si necesitas agregar más)
-app.post('/tipos-mantenimiento', async (req, res) => {
-  const { nombre } = req.body;
+
+
+
+// ========================= TIPO DE EQUIPO Y CAMPOS PERSONALIZADOS =========================
+// POST /tipos-equipo
+app.post("/tipos-equipo", async (req, res) => {
+  const { nombre, campos } = req.body;
+
+  if (!nombre || !campos || campos.length === 0) {
+    return res.status(400).json({ msg: "Datos incompletos" });
+  }
+
   try {
-    const result = await pool.query(
-      'INSERT INTO tipos_mantenimiento (nombre) VALUES ($1) RETURNING *',
+    // 1️⃣ Guardar el tipo de equipo y obtener su ID
+    const tipoRes = await pool.query(
+      "INSERT INTO tipos_equipo(nombre) VALUES($1) RETURNING id",
       [nombre]
     );
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al crear tipo de mantenimiento:', error);
-    res.status(500).json({ error: 'Error al crear tipo de mantenimiento' });
+    const id_tipo_equipo = tipoRes.rows[0].id;
+
+    // 2️⃣ Guardar campos personalizados
+    const insertCampos = campos.map(campo =>
+      pool.query(
+        "INSERT INTO campos_personalizados(nombre_campo, tipo_dato, id_tipo_equipo) VALUES($1, $2, $3)",
+        [campo.nombre, campo.tipo_dato || "texto", id_tipo_equipo]
+      )
+    );
+
+    await Promise.all(insertCampos);
+
+    res.json({ msg: "Tipo de equipo y campos guardados correctamente", id_tipo_equipo });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Error al guardar tipo de equipo" });
+  }
+});
+
+
+// GET /tipos-equipo
+app.get("/tipos-equipo", async (req, res) => {
+  try {
+    const tiposRes = await pool.query("SELECT * FROM tipos_equipo ORDER BY id");
+    const tipos = tiposRes.rows;
+
+    for (let tipo of tipos) {
+      const camposRes = await pool.query(
+        "SELECT * FROM campos_personalizados WHERE id_tipo_equipo = $1 ORDER BY id",
+        [tipo.id]
+      );
+      tipo.campos = camposRes.rows;
+    }
+
+    res.json(tipos);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Error al obtener tipos de equipo" });
+  }
+});
+
+// DELETE /tipos-equipo/:id
+app.delete("/tipos-equipo/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 1️⃣ Borrar los campos personalizados asociados
+    await pool.query("DELETE FROM campos_personalizados WHERE id_tipo_equipo = $1", [id]);
+
+    // 2️⃣ Borrar el tipo de equipo
+    const result = await pool.query("DELETE FROM tipos_equipo WHERE id = $1 RETURNING *", [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ msg: "Tipo de equipo no encontrado" });
+    }
+
+    res.json({ msg: "Tipo de equipo eliminado correctamente" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Error al eliminar tipo de equipo" });
   }
 });
 
 
 
+
+
+
+
+// Obtener información de ubicación (puesto o área) para autocompletar responsable y código
+app.get('/ubicacion/:tipo/:id', async (req, res) => {
+  const { tipo, id } = req.params;
+  try {
+    if (tipo === 'puesto') {
+      const result = await pool.query(
+        `SELECT codigo, responsable_nombre FROM puestos_trabajo WHERE id = $1`,
+        [id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ msg: 'Puesto no encontrado' });
+      return res.json(result.rows[0]);
+    } else if (tipo === 'area') {
+      const result = await pool.query(
+        `SELECT codigo, nombre AS responsable_nombre FROM areas WHERE id = $1`,
+        [id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ msg: 'Área no encontrada' });
+      return res.json(result.rows[0]);
+    } else {
+      return res.status(400).json({ msg: 'Tipo de ubicación inválido' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ msg: 'Error al obtener ubicación' });
+  }
+});
 
 
 

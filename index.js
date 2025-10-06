@@ -771,60 +771,177 @@ app.post('/equipos', async (req, res) => {
   }
 });
 
-
-
-// Actualizar un equipo
+// Actualizar un equipo (versión mejorada)
 app.put('/equipos/:id', async (req, res) => {
   const { id } = req.params;
   const {
     nombre,
     descripcion,
     codigo_interno,
-    ubicacion,
-    id_area,
-    id_puesto,
+    ubicacion_tipo,
+    id_ubicacion,
     responsable_nombre,
     responsable_documento,
-    id_tipo_equipo
+    id_tipo_equipo,
+    campos_personalizados,
+    estado
   } = req.body;
 
   try {
+    let id_area = null;
+    let id_puesto = null;
+    let final_responsable_nombre = responsable_nombre;
+    let final_responsable_documento = responsable_documento || "N/A";
+
+    // Obtener IDs de área o puesto
+    if (ubicacion_tipo === 'puesto') {
+      const puesto = await pool.query(
+        'SELECT id_area, responsable_nombre, responsable_documento FROM puestos_trabajo WHERE id=$1',
+        [id_ubicacion]
+      );
+      if (puesto.rows.length === 0)
+        return res.status(404).json({ msg: 'Puesto no encontrado' });
+
+      id_puesto = id_ubicacion;
+      id_area = puesto.rows[0].id_area;
+
+      if (!final_responsable_nombre) final_responsable_nombre = puesto.rows[0].responsable_nombre;
+      if (!final_responsable_documento) final_responsable_documento = puesto.rows[0].responsable_documento;
+
+    } else if (ubicacion_tipo === 'area') {
+      const area = await pool.query('SELECT id FROM areas WHERE id=$1', [id_ubicacion]);
+      if (area.rows.length === 0)
+        return res.status(404).json({ msg: 'Área no encontrada' });
+
+      id_area = id_ubicacion;
+    } else {
+      return res.status(400).json({ msg: 'Tipo de ubicación inválido' });
+    }
+
+    let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
+
+    // Actualizar equipo
     const result = await pool.query(
       `UPDATE equipos
        SET nombre=$1, descripcion=$2, codigo_interno=$3, ubicacion=$4,
-           id_area=$5, id_puesto=$6, responsable_nombre=$7, responsable_documento=$8, id_tipo_equipo=$9
-       WHERE id=$10
+           id_area=$5, id_puesto=$6, responsable_nombre=$7, responsable_documento=$8, 
+           id_tipo_equipo=$9, estado=$10
+       WHERE id=$11
        RETURNING *`,
-      [nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto, responsable_nombre, responsable_documento, id_tipo_equipo, id]
+      [
+        nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
+        final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
+        estado, id
+      ]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Equipo no encontrado' });
     }
 
-    res.json({ message: 'Equipo actualizado correctamente', equipo: result.rows[0] });
+    // Actualizar valores personalizados
+    if (campos_personalizados) {
+      // Eliminar valores existentes
+      await pool.query(
+        'DELETE FROM valores_personalizados WHERE id_equipo = $1',
+        [id]
+      );
+
+      // Insertar nuevos valores
+      for (const [nombreCampo, valor] of Object.entries(campos_personalizados)) {
+        const campoRes = await pool.query(
+          'SELECT id FROM campos_personalizados WHERE nombre_campo=$1 AND id_tipo_equipo=$2',
+          [nombreCampo, id_tipo_equipo]
+        );
+        if (campoRes.rows.length > 0) {
+          await pool.query(
+            'INSERT INTO valores_personalizados (id_equipo, id_campo, valor) VALUES ($1, $2, $3)',
+            [id, campoRes.rows[0].id, valor]
+          );
+        }
+      }
+    }
+
+    res.json({ 
+      message: 'Equipo actualizado correctamente', 
+      equipo: result.rows[0] 
+    });
+
   } catch (error) {
     console.error('Error al actualizar equipo:', error);
     res.status(500).json({ error: 'Error al actualizar el equipo' });
   }
 });
 
-// Eliminar un equipo
-app.delete('/equipos/:id', async (req, res) => {
+
+
+// Obtener un equipo por ID con todos sus datos (incluyendo mantenimientos configurados)
+app.get('/equipos/:id/completo', async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await pool.query('DELETE FROM equipos WHERE id = $1 RETURNING *', [id]);
+    // Traemos los datos principales del equipo
+    const result = await pool.query(`
+      SELECT 
+        e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
+        e.responsable_nombre, e.responsable_documento,
+        e.id_area, a.nombre AS area_nombre,
+        e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
+        e.id_tipo_equipo, te.nombre AS tipo_equipo_nombre,
+        s.id AS id_sede, s.nombre AS sede_nombre,
+        e.estado
+      FROM equipos e
+      LEFT JOIN areas a ON e.id_area = a.id
+      LEFT JOIN sedes s ON a.id_sede = s.id
+      LEFT JOIN puestos_trabajo p ON e.id_puesto = p.id
+      LEFT JOIN tipos_equipo te ON e.id_tipo_equipo = te.id
+      WHERE e.id = $1
+    `, [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Equipo no encontrado' });
     }
 
-    res.json({ message: 'Equipo eliminado correctamente', equipo: result.rows[0] });
+    const equipo = result.rows[0];
+
+    // 🟢 Traemos valores personalizados del equipo
+    const camposRes = await pool.query(`
+      SELECT c.nombre_campo, v.valor
+      FROM valores_personalizados v
+      JOIN campos_personalizados c ON v.id_campo = c.id
+      WHERE v.id_equipo = $1
+    `, [id]);
+
+    equipo.campos_personalizados = {};
+    camposRes.rows.forEach(c => {
+      equipo.campos_personalizados[c.nombre_campo] = c.valor;
+    });
+
+    // 🟢 Traemos mantenimientos configurados del equipo
+    const mantenimientosRes = await pool.query(`
+      SELECT em.*, tm.nombre as tipo_mantenimiento_nombre
+      FROM equipos_mantenimientos em
+      LEFT JOIN tipos_mantenimiento tm ON em.id_tipo_mantenimiento = tm.id
+      WHERE em.id_equipo = $1 AND em.activo = true
+      ORDER BY em.id
+    `, [id]);
+
+    equipo.mantenimientos_configurados = mantenimientosRes.rows;
+
+    res.json(equipo);
+
   } catch (error) {
-    console.error('Error al eliminar equipo:', error);
-    res.status(500).json({ error: 'Error al eliminar el equipo' });
+    console.error('Error al obtener equipo completo:', error);
+    res.status(500).json({ error: 'Error al obtener equipo' });
   }
 });
+
+
+
+
+
+
+
+
 
 
 

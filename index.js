@@ -464,15 +464,19 @@ app.delete('/areas/:id', async (req, res) => {
 // ========================= PUESTOS DE TRABAJO =========================
 
 // Obtener todos los puestos con área y sede
+// El endpoint /puestos debería incluir sede_nombre
 app.get('/puestos', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT p.id, p.codigo, p.responsable_nombre, p.responsable_documento,
-             a.nombre AS area_nombre, s.nombre AS sede_nombre
+      SELECT 
+        p.*,
+        a.nombre AS area_nombre,
+        s.nombre AS sede_nombre,
+        s.id AS sede_id
       FROM puestos_trabajo p
-      JOIN areas a ON p.id_area = a.id
-      JOIN sedes s ON a.id_sede = s.id
-      ORDER BY p.id
+      LEFT JOIN areas a ON p.id_area = a.id
+      LEFT JOIN sedes s ON a.id_sede = s.id
+      ORDER BY p.id ASC
     `);
     res.json(result.rows);
   } catch (error) {

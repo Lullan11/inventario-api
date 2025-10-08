@@ -1204,7 +1204,83 @@ app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
 
 
 
+// ========================= ELIMINACIÓN DE MANTENIMIENTOS =========================
 
+// Eliminar todos los mantenimientos de un equipo
+app.delete('/equipos/:id/mantenimientos', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'DELETE FROM equipos_mantenimientos WHERE id_equipo = $1 RETURNING *',
+      [id]
+    );
+    
+    res.json({
+      message: 'Mantenimientos eliminados correctamente',
+      eliminados: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error al eliminar mantenimientos:', error);
+    res.status(500).json({ error: 'Error al eliminar mantenimientos' });
+  }
+});
+
+// Eliminar un mantenimiento específico por ID
+app.delete('/mantenimientos-programados/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'DELETE FROM equipos_mantenimientos WHERE id = $1 RETURNING *',
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Mantenimiento no encontrado' });
+    }
+    
+    res.json({
+      message: 'Mantenimiento eliminado correctamente',
+      mantenimiento: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al eliminar mantenimiento:', error);
+    res.status(500).json({ error: 'Error al eliminar mantenimiento' });
+  }
+});
+
+// Actualizar un mantenimiento existente
+app.put('/mantenimientos-programados/:id', async (req, res) => {
+  const { id } = req.params;
+  const { id_tipo_mantenimiento, intervalo_dias, fecha_inicio, nombre_personalizado } = req.body;
+  
+  try {
+    // Calcular próxima fecha
+    const proximaFecha = new Date(fecha_inicio);
+    proximaFecha.setDate(proximaFecha.getDate() + intervalo_dias);
+
+    const result = await pool.query(
+      `UPDATE equipos_mantenimientos 
+       SET id_tipo_mantenimiento = $1, intervalo_dias = $2, fecha_inicio = $3, 
+           proxima_fecha = $4, nombre_personalizado = $5
+       WHERE id = $6 
+       RETURNING *`,
+      [id_tipo_mantenimiento, intervalo_dias, fecha_inicio, 
+       proximaFecha.toISOString().split('T')[0], nombre_personalizado, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Mantenimiento no encontrado' });
+    }
+
+    res.json({
+      message: 'Mantenimiento actualizado correctamente',
+      mantenimiento: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al actualizar mantenimiento:', error);
+    res.status(500).json({ error: 'Error al actualizar mantenimiento' });
+  }
+});
 
 
 

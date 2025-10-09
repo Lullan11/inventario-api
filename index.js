@@ -590,6 +590,7 @@ app.get('/areas/:id/puestos', async (req, res) => {
 // Obtener todos los equipos con área, sede y puesto
 // Obtener equipos con mantenimiento
 // Obtener equipos con sus mantenimientos configurados
+// Obtener equipos con sus mantenimientos configurados E IMÁGENES
 app.get('/equipos', async (req, res) => {
   const { puesto_id } = req.query;
   try {
@@ -602,7 +603,8 @@ app.get('/equipos', async (req, res) => {
         e.id_tipo_equipo,
         s.id AS id_sede, s.nombre AS sede_nombre,
         te.nombre AS tipo_equipo_nombre,
-        e.estado
+        e.estado,
+        e.imagen_url, e.imagen_public_id  -- 🆕 INCLUIR CAMPOS DE IMAGEN
       FROM equipos e
       LEFT JOIN areas a ON e.id_area = a.id
       LEFT JOIN sedes s ON a.id_sede = s.id
@@ -662,8 +664,10 @@ app.get('/equipos', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener los equipos' });
   }
 });
+
 // ========================= EQUIPOS =========================
 
+// Crear equipo con mantenimientos - VERSIÓN CORREGIDA
 // Crear equipo con mantenimientos - VERSIÓN CORREGIDA
 app.post('/equipos', async (req, res) => {
   const {
@@ -677,8 +681,8 @@ app.post('/equipos', async (req, res) => {
     id_tipo_equipo,
     campos_personalizados,
     mantenimientos,
-    imagen_url,           // 🆕 AGREGAR ESTOS CAMPOS
-    imagen_public_id      // 🆕 AGREGAR ESTOS CAMPOS
+    imagen_url,
+    imagen_public_id
   } = req.body;
 
   console.log('📥 Datos recibidos para crear equipo:', {
@@ -721,20 +725,27 @@ app.post('/equipos', async (req, res) => {
 
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
-    // 🆕 CORREGIR LA QUERY PARA INCLUIR CAMPOS DE IMAGEN
-    // Insertar equipo
+    // ✅ CORRECCIÓN: Query corregida con parámetros correctos
     const result = await pool.query(
       `INSERT INTO equipos
       (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
        responsable_nombre, responsable_documento, id_tipo_equipo, estado,
-       imagen_url, imagen_public_id)  -- 🆕 AGREGAR ESTOS CAMPOS
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'activo',$10,$11)  -- 🆕 AGREGAR PARÁMETROS
+       imagen_url, imagen_public_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
-        nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
-        final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
-        imagen_url || null,      // 🆕 PARÁMETRO 10
-        imagen_public_id || null // 🆕 PARÁMETRO 11
+        nombre, 
+        descripcion, 
+        codigo_interno, 
+        ubicacion, 
+        id_area, 
+        id_puesto,
+        final_responsable_nombre, 
+        final_responsable_documento, 
+        id_tipo_equipo,
+        'activo',  // estado
+        imagen_url || null,
+        imagen_public_id || null
       ]
     );
 
@@ -754,7 +765,7 @@ app.post('/equipos', async (req, res) => {
       }
     }
 
-    // Guardar configuraciones de mantenimiento (permite duplicados del mismo tipo)
+    // Guardar configuraciones de mantenimiento
     if (mantenimientos && mantenimientos.length > 0) {
       for (const mantenimiento of mantenimientos) {
         const proximaFecha = new Date(mantenimiento.fecha_inicio);
@@ -792,12 +803,11 @@ app.post('/equipos', async (req, res) => {
   } catch (err) {
     console.error("❌ Error al crear equipo:", err);
     
-    // 🆕 MEJOR MANEJO DE ERRORES ESPECÍFICOS
-    if (err.code === '23505') { // Violación de unique constraint
+    if (err.code === '23505') {
       return res.status(409).json({ 
         msg: 'El código del equipo ya existe en el sistema' 
       });
-    } else if (err.code === '23503') { // Violación de foreign key
+    } else if (err.code === '23503') {
       return res.status(400).json({ 
         msg: 'Datos de referencia inválidos (tipo de equipo, área o puesto no existe)' 
       });
@@ -809,7 +819,9 @@ app.post('/equipos', async (req, res) => {
     });
   }
 });
+
 // Actualizar un equipo (versión mejorada) - CORREGIDA
+// Actualizar un equipo - VERSIÓN SIMPLIFICADA
 app.put('/equipos/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -823,16 +835,15 @@ app.put('/equipos/:id', async (req, res) => {
     id_tipo_equipo,
     campos_personalizados,
     estado,
-    imagen_url,           // 🆕 AGREGAR ESTOS CAMPOS
-    imagen_public_id      // 🆕 AGREGAR ESTOS CAMPOS
+    imagen_url,           // 🆕 Puede ser null para eliminar imagen
+    imagen_public_id      // 🆕 Puede ser null para eliminar imagen
   } = req.body;
 
   console.log('📥 Datos recibidos para actualizar equipo:', {
     id,
     nombre,
-    codigo_interno,
-    imagen_url: imagen_url ? 'PRESENTE' : 'NO HAY',
-    imagen_public_id: imagen_public_id ? 'PRESENTE' : 'NO HAY'
+    imagen_url: imagen_url ? 'PRESENTE' : 'ELIMINAR/SIN CAMBIOS',
+    imagen_public_id: imagen_public_id ? 'PRESENTE' : 'ELIMINAR/SIN CAMBIOS'
   });
 
   try {
@@ -841,7 +852,7 @@ app.put('/equipos/:id', async (req, res) => {
     let final_responsable_nombre = responsable_nombre;
     let final_responsable_documento = responsable_documento || "N/A";
 
-    // Obtener IDs de área o puesto
+    // Obtener IDs de área o puesto (código existente)
     if (ubicacion_tipo === 'puesto') {
       const puesto = await pool.query(
         'SELECT id_area, responsable_nombre, responsable_documento FROM puestos_trabajo WHERE id=$1',
@@ -868,22 +879,29 @@ app.put('/equipos/:id', async (req, res) => {
 
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
-    // 🆕 CORREGIR LA QUERY PARA INCLUIR CAMPOS DE IMAGEN
-    // Actualizar equipo
+    // 🆕 Obtener imagen actual ANTES de actualizar (para cleanup opcional)
+    const equipoActual = await pool.query(
+      'SELECT imagen_public_id FROM equipos WHERE id = $1',
+      [id]
+    );
+
+    const publicIdAnterior = equipoActual.rows[0]?.imagen_public_id;
+
+    // 🆕 ACTUALIZAR EQUIPO (incluye manejo de imagen)
     const result = await pool.query(
       `UPDATE equipos
        SET nombre=$1, descripcion=$2, codigo_interno=$3, ubicacion=$4,
            id_area=$5, id_puesto=$6, responsable_nombre=$7, responsable_documento=$8, 
-           id_tipo_equipo=$9, estado=$10, imagen_url=$11, imagen_public_id=$12  -- 🆕 AGREGAR CAMPOS
+           id_tipo_equipo=$9, estado=$10, imagen_url=$11, imagen_public_id=$12
        WHERE id=$13
        RETURNING *`,
       [
         nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
         final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
         estado, 
-        imagen_url || null,      // 🆕 PARÁMETRO 11
-        imagen_public_id || null, // 🆕 PARÁMETRO 12
-        id                      // 🆕 PARÁMETRO 13
+        imagen_url,      // ✅ Puede ser null (eliminar imagen)
+        imagen_public_id, // ✅ Puede ser null (eliminar imagen)
+        id
       ]
     );
 
@@ -891,15 +909,30 @@ app.put('/equipos/:id', async (req, res) => {
       return res.status(404).json({ message: 'Equipo no encontrado' });
     }
 
-    // Actualizar valores personalizados
+    // 🆕 CLEANUP OPCIONAL: Eliminar imagen anterior de Cloudinary si fue reemplazada
+    if (publicIdAnterior && publicIdAnterior !== imagen_public_id) {
+      console.log('🔄 Imagen reemplazada, eliminando anterior de Cloudinary:', publicIdAnterior);
+      
+      // ⚠️ OPCIONAL: Descomenta si quieres auto-eliminar imágenes antiguas
+      /*
+      try {
+        const cloudinary = require('cloudinary').v2;
+        await cloudinary.uploader.destroy(publicIdAnterior);
+        console.log('✅ Imagen anterior eliminada de Cloudinary');
+      } catch (cloudinaryError) {
+        console.warn('⚠️ No se pudo eliminar imagen anterior de Cloudinary:', cloudinaryError);
+        // No falla la operación principal por esto
+      }
+      */
+    }
+
+    // Actualizar valores personalizados (código existente)
     if (campos_personalizados) {
-      // Eliminar valores existentes
       await pool.query(
         'DELETE FROM valores_personalizados WHERE id_equipo = $1',
         [id]
       );
 
-      // Insertar nuevos valores
       for (const [nombreCampo, valor] of Object.entries(campos_personalizados)) {
         const campoRes = await pool.query(
           'SELECT id FROM campos_personalizados WHERE nombre_campo=$1 AND id_tipo_equipo=$2',
@@ -917,7 +950,7 @@ app.put('/equipos/:id', async (req, res) => {
     console.log('✅ Equipo actualizado exitosamente:', {
       id,
       nombre,
-      imagen_url: imagen_url ? 'ACTUALIZADA' : 'SIN CAMBIOS'
+      imagen_actualizada: imagen_url ? 'NUEVA' : (imagen_url === null ? 'ELIMINADA' : 'SIN CAMBIOS')
     });
 
     res.json({ 
@@ -928,8 +961,7 @@ app.put('/equipos/:id', async (req, res) => {
   } catch (error) {
     console.error('❌ Error al actualizar equipo:', error);
     
-    // 🆕 MEJOR MANEJO DE ERRORES ESPECÍFICOS
-    if (error.code === '23505') { // Violación de unique constraint
+    if (error.code === '23505') {
       return res.status(409).json({ 
         message: 'El código del equipo ya existe en el sistema' 
       });

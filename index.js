@@ -664,7 +664,7 @@ app.get('/equipos', async (req, res) => {
 });
 // ========================= EQUIPOS =========================
 
-// Crear equipo con mantenimientos
+// Crear equipo con mantenimientos - VERSIÓN CORREGIDA
 app.post('/equipos', async (req, res) => {
   const {
     nombre,
@@ -676,8 +676,17 @@ app.post('/equipos', async (req, res) => {
     responsable_documento,
     id_tipo_equipo,
     campos_personalizados,
-    mantenimientos
+    mantenimientos,
+    imagen_url,           // 🆕 AGREGAR ESTOS CAMPOS
+    imagen_public_id      // 🆕 AGREGAR ESTOS CAMPOS
   } = req.body;
+
+  console.log('📥 Datos recibidos para crear equipo:', {
+    nombre,
+    codigo_interno,
+    imagen_url: imagen_url ? 'PRESENTE' : 'NO HAY',
+    imagen_public_id: imagen_public_id ? 'PRESENTE' : 'NO HAY'
+  });
 
   try {
     let id_area = null;
@@ -712,16 +721,20 @@ app.post('/equipos', async (req, res) => {
 
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
+    // 🆕 CORREGIR LA QUERY PARA INCLUIR CAMPOS DE IMAGEN
     // Insertar equipo
     const result = await pool.query(
       `INSERT INTO equipos
       (nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
-       responsable_nombre, responsable_documento, id_tipo_equipo, estado)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'activo')
+       responsable_nombre, responsable_documento, id_tipo_equipo, estado,
+       imagen_url, imagen_public_id)  -- 🆕 AGREGAR ESTOS CAMPOS
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'activo',$10,$11)  -- 🆕 AGREGAR PARÁMETROS
       RETURNING *`,
       [
         nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
-        final_responsable_nombre, final_responsable_documento, id_tipo_equipo
+        final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
+        imagen_url || null,      // 🆕 PARÁMETRO 10
+        imagen_public_id || null // 🆕 PARÁMETRO 11
       ]
     );
 
@@ -763,6 +776,13 @@ app.post('/equipos', async (req, res) => {
       }
     }
 
+    console.log('✅ Equipo creado exitosamente:', {
+      id: id_equipo,
+      nombre,
+      codigo_interno,
+      imagen_url: imagen_url ? 'GUARDADA' : 'NO HAY'
+    });
+
     res.status(201).json({
       msg: 'Equipo creado correctamente',
       equipo: result.rows[0],
@@ -770,11 +790,25 @@ app.post('/equipos', async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Error al crear equipo:", err);
-    res.status(500).json({ msg: err.message });
+    console.error("❌ Error al crear equipo:", err);
+    
+    // 🆕 MEJOR MANEJO DE ERRORES ESPECÍFICOS
+    if (err.code === '23505') { // Violación de unique constraint
+      return res.status(409).json({ 
+        msg: 'El código del equipo ya existe en el sistema' 
+      });
+    } else if (err.code === '23503') { // Violación de foreign key
+      return res.status(400).json({ 
+        msg: 'Datos de referencia inválidos (tipo de equipo, área o puesto no existe)' 
+      });
+    }
+    
+    res.status(500).json({ 
+      msg: 'Error interno del servidor al crear equipo',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
-
 // Actualizar un equipo (versión mejorada) - CORREGIDA
 app.put('/equipos/:id', async (req, res) => {
   const { id } = req.params;

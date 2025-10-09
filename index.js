@@ -775,7 +775,7 @@ app.post('/equipos', async (req, res) => {
   }
 });
 
-// Actualizar un equipo (versión mejorada)
+// Actualizar un equipo (versión mejorada) - CORREGIDA
 app.put('/equipos/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -788,8 +788,18 @@ app.put('/equipos/:id', async (req, res) => {
     responsable_documento,
     id_tipo_equipo,
     campos_personalizados,
-    estado
+    estado,
+    imagen_url,           // 🆕 AGREGAR ESTOS CAMPOS
+    imagen_public_id      // 🆕 AGREGAR ESTOS CAMPOS
   } = req.body;
+
+  console.log('📥 Datos recibidos para actualizar equipo:', {
+    id,
+    nombre,
+    codigo_interno,
+    imagen_url: imagen_url ? 'PRESENTE' : 'NO HAY',
+    imagen_public_id: imagen_public_id ? 'PRESENTE' : 'NO HAY'
+  });
 
   try {
     let id_area = null;
@@ -824,18 +834,22 @@ app.put('/equipos/:id', async (req, res) => {
 
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
+    // 🆕 CORREGIR LA QUERY PARA INCLUIR CAMPOS DE IMAGEN
     // Actualizar equipo
     const result = await pool.query(
       `UPDATE equipos
        SET nombre=$1, descripcion=$2, codigo_interno=$3, ubicacion=$4,
            id_area=$5, id_puesto=$6, responsable_nombre=$7, responsable_documento=$8, 
-           id_tipo_equipo=$9, estado=$10
-       WHERE id=$11
+           id_tipo_equipo=$9, estado=$10, imagen_url=$11, imagen_public_id=$12  -- 🆕 AGREGAR CAMPOS
+       WHERE id=$13
        RETURNING *`,
       [
         nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
         final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
-        estado, id
+        estado, 
+        imagen_url || null,      // 🆕 PARÁMETRO 11
+        imagen_public_id || null, // 🆕 PARÁMETRO 12
+        id                      // 🆕 PARÁMETRO 13
       ]
     );
 
@@ -866,17 +880,33 @@ app.put('/equipos/:id', async (req, res) => {
       }
     }
 
+    console.log('✅ Equipo actualizado exitosamente:', {
+      id,
+      nombre,
+      imagen_url: imagen_url ? 'ACTUALIZADA' : 'SIN CAMBIOS'
+    });
+
     res.json({ 
       message: 'Equipo actualizado correctamente', 
       equipo: result.rows[0] 
     });
 
   } catch (error) {
-    console.error('Error al actualizar equipo:', error);
-    res.status(500).json({ error: 'Error al actualizar el equipo' });
+    console.error('❌ Error al actualizar equipo:', error);
+    
+    // 🆕 MEJOR MANEJO DE ERRORES ESPECÍFICOS
+    if (error.code === '23505') { // Violación de unique constraint
+      return res.status(409).json({ 
+        message: 'El código del equipo ya existe en el sistema' 
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Error al actualizar el equipo',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
-
 
 
 // Obtener un equipo por ID con todos sus datos (incluyendo mantenimientos configurados)

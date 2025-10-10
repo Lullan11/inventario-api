@@ -821,7 +821,7 @@ app.post('/equipos', async (req, res) => {
 });
 
 // Actualizar un equipo (versión mejorada) - CORREGIDA
-// Actualizar un equipo - VERSIÓN SIMPLIFICADA
+// Actualizar un equipo - VERSIÓN CORREGIDA
 app.put('/equipos/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -835,15 +835,15 @@ app.put('/equipos/:id', async (req, res) => {
     id_tipo_equipo,
     campos_personalizados,
     estado,
-    imagen_url,           // 🆕 Puede ser null para eliminar imagen
-    imagen_public_id      // 🆕 Puede ser null para eliminar imagen
+    imagen_url,           // 🆕 Puede ser: nueva URL, "" (vacío para eliminar), o undefined (sin cambios)
+    imagen_public_id      // 🆕 Puede ser: nuevo ID, "" (vacío para eliminar), o undefined (sin cambios)
   } = req.body;
 
   console.log('📥 Datos recibidos para actualizar equipo:', {
     id,
     nombre,
-    imagen_url: imagen_url ? 'PRESENTE' : 'ELIMINAR/SIN CAMBIOS',
-    imagen_public_id: imagen_public_id ? 'PRESENTE' : 'ELIMINAR/SIN CAMBIOS'
+    imagen_url: imagen_url !== undefined ? (imagen_url === "" ? "ELIMINAR" : "NUEVA_URL") : "SIN_CAMBIOS",
+    imagen_public_id: imagen_public_id !== undefined ? (imagen_public_id === "" ? "ELIMINAR" : "NUEVO_ID") : "SIN_CAMBIOS"
   });
 
   try {
@@ -879,15 +879,39 @@ app.put('/equipos/:id', async (req, res) => {
 
     let ubicacion = (ubicacion_tipo === 'puesto') ? 'puesto' : 'area';
 
-    // 🆕 Obtener imagen actual ANTES de actualizar (para cleanup opcional)
+    // 🆕 Obtener imagen actual ANTES de actualizar
     const equipoActual = await pool.query(
-      'SELECT imagen_public_id FROM equipos WHERE id = $1',
+      'SELECT imagen_url, imagen_public_id FROM equipos WHERE id = $1',
       [id]
     );
 
+    const imagenActual = equipoActual.rows[0]?.imagen_url;
     const publicIdAnterior = equipoActual.rows[0]?.imagen_public_id;
 
-    // 🆕 ACTUALIZAR EQUIPO (incluye manejo de imagen)
+    // 🆕 LÓGICA MEJORADA: Determinar valores finales para imagen
+    let final_imagen_url = imagenActual;
+    let final_imagen_public_id = publicIdAnterior;
+
+    // CASO 1: Se envía imagen_url vacía -> ELIMINAR IMAGEN
+    if (imagen_url === "") {
+      console.log('🗑️ Eliminando imagen del equipo');
+      final_imagen_url = null;
+      final_imagen_public_id = null;
+    }
+    // CASO 2: Se envía nueva imagen_url -> ACTUALIZAR IMAGEN
+    else if (imagen_url && imagen_url !== "") {
+      console.log('🖼️ Actualizando imagen del equipo');
+      final_imagen_url = imagen_url;
+      final_imagen_public_id = imagen_public_id || null;
+    }
+    // CASO 3: No se envía imagen_url -> MANTENER IMAGEN ACTUAL (no hacer cambios)
+
+    console.log('🔄 Valores finales para imagen:', {
+      final_imagen_url: final_imagen_url ? 'PRESENTE' : 'NULL',
+      final_imagen_public_id: final_imagen_public_id ? 'PRESENTE' : 'NULL'
+    });
+
+    // 🆕 ACTUALIZAR EQUIPO con lógica de imagen corregida
     const result = await pool.query(
       `UPDATE equipos
        SET nombre=$1, descripcion=$2, codigo_interno=$3, ubicacion=$4,
@@ -896,11 +920,18 @@ app.put('/equipos/:id', async (req, res) => {
        WHERE id=$13
        RETURNING *`,
       [
-        nombre, descripcion, codigo_interno, ubicacion, id_area, id_puesto,
-        final_responsable_nombre, final_responsable_documento, id_tipo_equipo,
+        nombre, 
+        descripcion, 
+        codigo_interno, 
+        ubicacion, 
+        id_area, 
+        id_puesto,
+        final_responsable_nombre, 
+        final_responsable_documento, 
+        id_tipo_equipo,
         estado, 
-        imagen_url,      // ✅ Puede ser null (eliminar imagen)
-        imagen_public_id, // ✅ Puede ser null (eliminar imagen)
+        final_imagen_url,      // ✅ Usamos el valor calculado
+        final_imagen_public_id, // ✅ Usamos el valor calculado
         id
       ]
     );
@@ -909,18 +940,18 @@ app.put('/equipos/:id', async (req, res) => {
       return res.status(404).json({ message: 'Equipo no encontrado' });
     }
 
-    // 🆕 CLEANUP OPCIONAL: Eliminar imagen anterior de Cloudinary si fue reemplazada
-    if (publicIdAnterior && publicIdAnterior !== imagen_public_id) {
-      console.log('🔄 Imagen reemplazada, eliminando anterior de Cloudinary:', publicIdAnterior);
+    // 🆕 CLEANUP MEJORADO: Eliminar imagen anterior de Cloudinary solo si fue reemplazada o eliminada
+    if (publicIdAnterior && publicIdAnterior !== final_imagen_public_id) {
+      console.log('🔄 Imagen cambiada, eliminando anterior de Cloudinary:', publicIdAnterior);
       
-      // ⚠️ OPCIONAL: Descomenta si quieres auto-eliminar imágenes antiguas
+      // ⚠️ OPCIONAL: Descomenta si quieres auto-eliminar imágenes antiguas de Cloudinary
       /*
       try {
         const cloudinary = require('cloudinary').v2;
-        await cloudinary.uploader.destroy(publicIdAnterior);
-        console.log('✅ Imagen anterior eliminada de Cloudinary');
+        const deleteResult = await cloudinary.uploader.destroy(publicIdAnterior);
+        console.log('✅ Imagen anterior eliminada de Cloudinary:', deleteResult);
       } catch (cloudinaryError) {
-        console.warn('⚠️ No se pudo eliminar imagen anterior de Cloudinary:', cloudinaryError);
+        console.warn('⚠️ No se pudo eliminar imagen anterior de Cloudinary:', cloudinaryError.message);
         // No falla la operación principal por esto
       }
       */
@@ -950,7 +981,7 @@ app.put('/equipos/:id', async (req, res) => {
     console.log('✅ Equipo actualizado exitosamente:', {
       id,
       nombre,
-      imagen_actualizada: imagen_url ? 'NUEVA' : (imagen_url === null ? 'ELIMINADA' : 'SIN CAMBIOS')
+      imagen_estado: final_imagen_url ? 'NUEVA/MANTENIDA' : 'ELIMINADA'
     });
 
     res.json({ 

@@ -976,10 +976,11 @@ app.put('/equipos/:id', async (req, res) => {
 
 
 // Obtener un equipo por ID con todos sus datos (incluyendo mantenimientos configurados)
+// Obtener un equipo por ID con todos sus datos (incluyendo mantenimientos configurados) - CORREGIDO
 app.get('/equipos/:id/completo', async (req, res) => {
   const { id } = req.params;
   try {
-    // Traemos los datos principales del equipo
+    // 🆕 CORRECCIÓN: INCLUIR CAMPOS DE IMAGEN EN LA CONSULTA
     const result = await pool.query(`
       SELECT 
         e.id, e.nombre, e.descripcion, e.codigo_interno, e.ubicacion,
@@ -988,7 +989,8 @@ app.get('/equipos/:id/completo', async (req, res) => {
         e.id_puesto, p.codigo AS puesto_codigo, p.responsable_nombre AS puesto_responsable,
         e.id_tipo_equipo, te.nombre AS tipo_equipo_nombre,
         s.id AS id_sede, s.nombre AS sede_nombre,
-        e.estado
+        e.estado,
+        e.imagen_url, e.imagen_public_id  -- 🆕 AGREGAR ESTOS CAMPOS
       FROM equipos e
       LEFT JOIN areas a ON e.id_area = a.id
       LEFT JOIN sedes s ON a.id_sede = s.id
@@ -1027,6 +1029,15 @@ app.get('/equipos/:id/completo', async (req, res) => {
 
     equipo.mantenimientos_configurados = mantenimientosRes.rows;
 
+    // 🆕 LOG PARA VERIFICAR
+    console.log('📥 Equipo completo cargado:', {
+      id: equipo.id,
+      nombre: equipo.nombre,
+      imagen_url: equipo.imagen_url,
+      imagen_public_id: equipo.imagen_public_id,
+      tieneImagen: !!(equipo.imagen_url || equipo.imagen_public_id)
+    });
+
     res.json(equipo);
 
   } catch (error) {
@@ -1034,7 +1045,6 @@ app.get('/equipos/:id/completo', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener equipo' });
   }
 });
-
 
 
 

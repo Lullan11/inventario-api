@@ -1267,59 +1267,107 @@ app.post('/equipos/:id/mantenimientos', async (req, res) => {
 
 // ========================= EJECUCIÓN DE MANTENIMIENTOS =========================
 
-// Registrar mantenimiento realizado
+// ========================= EJECUCIÓN DE MANTENIMIENTOS =========================
+
+// Registrar mantenimiento realizado - VERSIÓN CORREGIDA
 app.post('/mantenimientos', async (req, res) => {
   const {
     id_equipo,
-    id_tipo_mantenimiento,
+    id_tipo,  // CAMBIADO: era id_tipo_mantenimiento
+    fecha_programada,  // NUEVO: fecha que estaba programada
     fecha_realizado,
     descripcion,
     realizado_por,
-    observaciones
+    observaciones,
+    documento_url,      // NUEVO
+    documento_public_id // NUEVO
   } = req.body;
 
+  console.log('📥 Datos recibidos para mantenimiento:', {
+    id_equipo,
+    id_tipo,
+    fecha_programada,
+    fecha_realizado,
+    descripcion,
+    realizado_por,
+    tieneDocumento: !!(documento_url || documento_public_id)
+  });
+
   try {
-    // 1. Registrar en historial
+    // 1. Registrar en historial de mantenimientos
     const result = await pool.query(
       `INSERT INTO mantenimientos 
-      (id_equipo, id_tipo, fecha_programada, fecha_realizado, descripcion, realizado_por, observaciones, estado)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'realizado')
+      (id_equipo, id_tipo, fecha_programada, fecha_realizado, descripcion, 
+       realizado_por, observaciones, estado, documento_url, documento_public_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'realizado', $8, $9)
       RETURNING *`,
-      [id_equipo, id_tipo_mantenimiento, fecha_realizado, fecha_realizado, descripcion, realizado_por, observaciones]
+      [
+        id_equipo, 
+        id_tipo,  // CAMBIADO
+        fecha_programada || fecha_realizado, // Usar fecha programada si existe, sino la de realizado
+        fecha_realizado, 
+        descripcion, 
+        realizado_por, 
+        observaciones,
+        documento_url || null,
+        documento_public_id || null
+      ]
     );
 
-    // 2. Actualizar próxima fecha en la configuración
-    const configRes = await pool.query(
-      `SELECT intervalo_dias FROM equipos_mantenimientos 
-       WHERE id_equipo = $1 AND id_tipo_mantenimiento = $2 AND activo = true`,
-      [id_equipo, id_tipo_mantenimiento]
+    // 2. Para mantenimientos preventivos y calibración, actualizar próxima fecha
+    // Obtener el tipo de mantenimiento para ver si es preventivo/calibración
+    const tipoMantRes = await pool.query(
+      'SELECT nombre FROM tipos_mantenimiento WHERE id = $1',
+      [id_tipo]
     );
 
-    if (configRes.rows.length > 0) {
-      const intervalo = configRes.rows[0].intervalo_dias;
-      const proximaFecha = new Date(fecha_realizado);
-      proximaFecha.setDate(proximaFecha.getDate() + intervalo);
+    if (tipoMantRes.rows.length > 0) {
+      const tipoNombre = tipoMantRes.rows[0].nombre.toLowerCase();
+      
+      // Solo actualizar para preventivo y calibración (no para correctivo)
+      if (tipoNombre !== 'correctivo') {
+        const configRes = await pool.query(
+          `SELECT intervalo_dias FROM equipos_mantenimientos 
+           WHERE id_equipo = $1 AND id_tipo_mantenimiento = $2 AND activo = true`,
+          [id_equipo, id_tipo]
+        );
 
-      await pool.query(
-        `UPDATE equipos_mantenimientos 
-         SET fecha_inicio = $1, proxima_fecha = $2
-         WHERE id_equipo = $3 AND id_tipo_mantenimiento = $4 AND activo = true`,
-        [fecha_realizado, proximaFecha.toISOString().split('T')[0], id_equipo, id_tipo_mantenimiento]
-      );
+        if (configRes.rows.length > 0) {
+          const intervalo = configRes.rows[0].intervalo_dias;
+          const proximaFecha = new Date(fecha_realizado);
+          proximaFecha.setDate(proximaFecha.getDate() + intervalo);
+
+          await pool.query(
+            `UPDATE equipos_mantenimientos 
+             SET fecha_inicio = $1, proxima_fecha = $2
+             WHERE id_equipo = $3 AND id_tipo_mantenimiento = $4 AND activo = true`,
+            [fecha_realizado, proximaFecha.toISOString().split('T')[0], id_equipo, id_tipo]
+          );
+
+          console.log('🔄 Próxima fecha calculada:', {
+            intervalo_dias: intervalo,
+            proxima_fecha: proximaFecha.toISOString().split('T')[0]
+          });
+        }
+      }
     }
+
+    console.log('✅ Mantenimiento registrado exitosamente:', {
+      id: result.rows[0].id,
+      equipo: id_equipo,
+      tipo: id_tipo
+    });
 
     res.status(201).json({
       msg: 'Mantenimiento registrado correctamente',
-      mantenimiento: result.rows[0],
-      proxima_fecha_calculada: proximaFecha ? proximaFecha.toISOString().split('T')[0] : null
+      mantenimiento: result.rows[0]
     });
 
   } catch (error) {
-    console.error('Error al registrar mantenimiento:', error);
+    console.error('❌ Error al registrar mantenimiento:', error);
     res.status(500).json({ error: 'Error al registrar mantenimiento' });
   }
 });
-
 // Obtener historial de mantenimientos de un equipo
 app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
   try {

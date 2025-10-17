@@ -1368,6 +1368,74 @@ app.post('/mantenimientos', async (req, res) => {
     res.status(500).json({ error: 'Error al registrar mantenimiento' });
   }
 });
+
+
+
+
+// ========================= ACTUALIZACIÓN DE MANTENIMIENTOS =========================
+
+// Obtener un mantenimiento por ID
+app.get('/mantenimientos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT m.*, tm.nombre as tipo_mantenimiento 
+      FROM mantenimientos m
+      LEFT JOIN tipos_mantenimiento tm ON m.id_tipo = tm.id
+      WHERE m.id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Mantenimiento no encontrado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener mantenimiento:', error);
+    res.status(500).json({ error: 'Error al obtener mantenimiento' });
+  }
+});
+
+// Actualizar un mantenimiento existente
+app.put('/mantenimientos/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    fecha_realizado,
+    descripcion,
+    realizado_por,
+    observaciones,
+    documento_url,
+    documento_public_id
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE mantenimientos 
+       SET fecha_realizado = $1, descripcion = $2, realizado_por = $3, 
+           observaciones = $4, documento_url = $5, documento_public_id = $6
+       WHERE id = $7 
+       RETURNING *`,
+      [fecha_realizado, descripcion, realizado_por, observaciones, 
+       documento_url, documento_public_id, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Mantenimiento no encontrado' });
+    }
+
+    res.json({
+      message: 'Mantenimiento actualizado correctamente',
+      mantenimiento: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al actualizar mantenimiento:', error);
+    res.status(500).json({ error: 'Error al actualizar mantenimiento' });
+  }
+});
+
+
+
+
 // Obtener historial de mantenimientos de un equipo
 app.get('/mantenimientos/equipo/:id_equipo', async (req, res) => {
   try {

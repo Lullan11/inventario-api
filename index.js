@@ -1273,14 +1273,15 @@ app.post('/equipos/:id/mantenimientos', async (req, res) => {
 app.post('/mantenimientos', async (req, res) => {
   const {
     id_equipo,
-    id_tipo,  // CAMBIADO: era id_tipo_mantenimiento
-    fecha_programada,  // NUEVO: fecha que estaba programada
+    id_tipo,
+    fecha_programada,
     fecha_realizado,
     descripcion,
     realizado_por,
     observaciones,
-    documento_url,      // NUEVO
-    documento_public_id // NUEVO
+    documento_url,
+    documento_public_id,
+    id_mantenimiento_programado  // NUEVO: ID específico del mantenimiento programado
   } = req.body;
 
   console.log('📥 Datos recibidos para mantenimiento:', {
@@ -1288,8 +1289,7 @@ app.post('/mantenimientos', async (req, res) => {
     id_tipo,
     fecha_programada,
     fecha_realizado,
-    descripcion,
-    realizado_por,
+    id_mantenimiento_programado,
     tieneDocumento: !!(documento_url || documento_public_id)
   });
 
@@ -1303,8 +1303,8 @@ app.post('/mantenimientos', async (req, res) => {
       RETURNING *`,
       [
         id_equipo, 
-        id_tipo,  // CAMBIADO
-        fecha_programada || fecha_realizado, // Usar fecha programada si existe, sino la de realizado
+        id_tipo,
+        fecha_programada || fecha_realizado,
         fecha_realizado, 
         descripcion, 
         realizado_por, 
@@ -1314,8 +1314,7 @@ app.post('/mantenimientos', async (req, res) => {
       ]
     );
 
-    // 2. Para mantenimientos preventivos y calibración, actualizar próxima fecha
-    // Obtener el tipo de mantenimiento para ver si es preventivo/calibración
+    // 2. Para mantenimientos preventivos y calibración, actualizar próxima fecha DEL MANTENIMIENTO ESPECÍFICO
     const tipoMantRes = await pool.query(
       'SELECT nombre FROM tipos_mantenimiento WHERE id = $1',
       [id_tipo]
@@ -1325,11 +1324,17 @@ app.post('/mantenimientos', async (req, res) => {
       const tipoNombre = tipoMantRes.rows[0].nombre.toLowerCase();
       
       // Solo actualizar para preventivo y calibración (no para correctivo)
-      if (tipoNombre !== 'correctivo') {
+      if (tipoNombre !== 'correctivo' && id_mantenimiento_programado) {
+        console.log('🔄 Actualizando próxima fecha para mantenimiento específico:', {
+          id_mantenimiento_programado: id_mantenimiento_programado,
+          fecha_realizado: fecha_realizado
+        });
+
+        // Obtener el intervalo del mantenimiento específico
         const configRes = await pool.query(
           `SELECT intervalo_dias FROM equipos_mantenimientos 
-           WHERE id_equipo = $1 AND id_tipo_mantenimiento = $2 AND activo = true`,
-          [id_equipo, id_tipo]
+           WHERE id = $1 AND id_equipo = $2 AND activo = true`,
+          [id_mantenimiento_programado, id_equipo]
         );
 
         if (configRes.rows.length > 0) {
@@ -1340,11 +1345,12 @@ app.post('/mantenimientos', async (req, res) => {
           await pool.query(
             `UPDATE equipos_mantenimientos 
              SET fecha_inicio = $1, proxima_fecha = $2
-             WHERE id_equipo = $3 AND id_tipo_mantenimiento = $4 AND activo = true`,
-            [fecha_realizado, proximaFecha.toISOString().split('T')[0], id_equipo, id_tipo]
+             WHERE id = $3 AND id_equipo = $4 AND activo = true`,
+            [fecha_realizado, proximaFecha.toISOString().split('T')[0], id_mantenimiento_programado, id_equipo]
           );
 
-          console.log('🔄 Próxima fecha calculada:', {
+          console.log('✅ Próxima fecha actualizada:', {
+            mantenimientoId: id_mantenimiento_programado,
             intervalo_dias: intervalo,
             proxima_fecha: proximaFecha.toISOString().split('T')[0]
           });
@@ -1355,7 +1361,8 @@ app.post('/mantenimientos', async (req, res) => {
     console.log('✅ Mantenimiento registrado exitosamente:', {
       id: result.rows[0].id,
       equipo: id_equipo,
-      tipo: id_tipo
+      tipo: id_tipo,
+      id_mantenimiento_programado: id_mantenimiento_programado
     });
 
     res.status(201).json({
